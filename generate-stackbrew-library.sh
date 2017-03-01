@@ -3,6 +3,7 @@ set -eu
 
 declare -A aliases
 aliases=(
+	[mainline]='1 1.11 latest'
 	[stable]='1.10'
 )
 
@@ -67,4 +68,18 @@ for version in "${versions[@]}"; do
 		GitCommit: $commit
 		Directory: $version/$base
 	EOE
+
+	for variant in alpine; do
+		commit="$(dirCommit "$version/$variant")"
+
+		variantAliases=( "${versionAliases[@]/%/-$variant}" )
+		variantAliases=( "${variantAliases[@]//latest-/}" )
+
+		echo
+		cat <<-EOE
+			Tags: $(join ', ' "${variantAliases[@]}")
+			GitCommit: $commit
+			Directory: $version/$variant
+		EOE
+	done
 done
