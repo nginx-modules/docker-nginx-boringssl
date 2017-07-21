@@ -1,4 +1,4 @@
-FROM alpine:3.5
+FROM alpine:3.6
 
 MAINTAINER Denis Denisov "denji0k@gmail.com"
 
