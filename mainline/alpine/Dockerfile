@@ -1,8 +1,8 @@
-FROM alpine:3.6
+FROM alpine:3.7
 
 MAINTAINER Denis Denisov "denji0k@gmail.com"
 
-ENV NGINX_VERSION 1.13.6
+ENV NGINX_VERSION 1.13.11
 
 RUN GPG_KEYS=B0F4253373F8F6F510D42178520A9993A1C052F8 \
 	&& CONFIG="\
@@ -107,7 +107,7 @@ RUN GPG_KEYS=B0F4253373F8F6F510D42178520A9993A1C052F8 \
 	&& rm -rf "$GNUPGHOME" nginx.tar.gz.asc \
 	&& mkdir -p /usr/src \
 	\
-	&& (git clone --depth=1 https://github.com/nginx-modules/libbrotli /usr/src/libbrotli \
+	&& (git clone --depth=1 https://github.com/bagder/libbrotli /usr/src/libbrotli \
 		&& cd /usr/src/libbrotli \
 		&& ./autogen.sh && ./configure && make -j$(getconf _NPROCESSORS_ONLN) && make install) \
 	&& git clone --depth=1 --recurse-submodules https://github.com/google/ngx_brotli /usr/src/ngx_brotli \
