@@ -1,8 +1,6 @@
 FROM alpine:3.7
 
-MAINTAINER Denis Denisov "denji0k@gmail.com"
-
-ENV NGINX_VERSION 1.13.11
+ENV NGINX_VERSION=1.13.11
 
 RUN GPG_KEYS=B0F4253373F8F6F510D42178520A9993A1C052F8 \
 	&& CONFIG="\
@@ -185,7 +183,8 @@ RUN GPG_KEYS=B0F4253373F8F6F510D42178520A9993A1C052F8 \
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY nginx.vh.no-default.conf /etc/nginx/conf.d/default.conf
 
-LABEL description="nginx built from source" \
+LABEL description="NGINX Docker built top of rolling release BoringSSL" \
+      maintainer="Denis Denisov <denji0k@gmail.com>" \
       openssl="BoringSSL" \
       nginx="nginx $NGINX_VERSION"
 
