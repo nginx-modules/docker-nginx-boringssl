@@ -1,5 +1,13 @@
 # **NGINX** built with **BoringSSL** & **TLSv1.3**
 
+### Build
+
+[![](https://images.microbadger.com/badges/version/denji/nginx-boringssl.svg)](https://microbadger.com/images/denji/nginx-boringssl)
+
+### Docker image
+
+[![](https://images.microbadger.com/badges/image/denji/nginx-boringssl.svg)](https://microbadger.com/images/denji/nginx-boringssl) [![](https://img.shields.io/docker/automated/denji/nginx-boringssl.svg)](https://hub.docker.com/r/denji/nginx-boringssl/builds/) [![](https://img.shields.io/docker/pulls/denji/nginx-boringssl.svg)](https://hub.docker.com/r/denji/nginx-boringssl/) [![](https://img.shields.io/docker/stars/denji/nginx-boringssl.svg)](https://hub.docker.com/r/denji/nginx-boringssl/)
+
 #### Before you can use
 
 This project is unstable state because of the rolling release **BoringSSL**, and modules.
