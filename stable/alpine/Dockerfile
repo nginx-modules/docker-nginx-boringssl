@@ -1,6 +1,6 @@
 FROM alpine:3.7
 
-ENV NGINX_VERSION=1.12.2
+ENV NGINX_VERSION=1.14.0
 
 RUN GPG_KEYS=B0F4253373F8F6F510D42178520A9993A1C052F8 \
 	&& CONFIG="\
@@ -127,7 +127,7 @@ RUN GPG_KEYS=B0F4253373F8F6F510D42178520A9993A1C052F8 \
 	&& tar -zxC /usr/src -f nginx.tar.gz \
 	&& rm nginx.tar.gz \
 	&& cd /usr/src/nginx-$NGINX_VERSION \
-	&& curl -fSL https://cdn.rawgit.com/nginx-modules/ngx_http_tls_dyn_size/0.1/nginx-dyntls-1.11.5.diff -o dynamic_tls_records.patch \
+	&& curl -fSL https://cdn.rawgit.com/nginx-modules/ngx_http_tls_dyn_size/556ed42/nginx__dynamic_tls_records_1.13.0%2B.patch -o dynamic_tls_records.patch \
 	&& patch -p1 < dynamic_tls_records.patch \
 	&& ./configure $CONFIG --with-debug \
 	&& make -j$(getconf _NPROCESSORS_ONLN) \
