@@ -115,7 +115,7 @@ RUN GPG_KEYS=B0F4253373F8F6F510D42178520A9993A1C052F8 \
 		&& mkdir -p /usr/src/boringssl/build /usr/src/boringssl/.openssl/lib /usr/src/boringssl/.openssl/include \
 		&& ln -sf /usr/src/boringssl/include/openssl /usr/src/boringssl/.openssl/include/openssl \
 		&& touch /usr/src/boringssl/.openssl/include/openssl/ssl.h \
-		&& cmake -B/usr/src/boringssl/build -H/usr/src/boringssl \
+		&& cmake -B/usr/src/boringssl/build -H/usr/src/boringssl -DCMAKE_BUILD_TYPE=Release \
 		&& make -C/usr/src/boringssl/build -j$(getconf _NPROCESSORS_ONLN) \
 		&& cp /usr/src/boringssl/build/crypto/libcrypto.a /usr/src/boringssl/build/ssl/libssl.a /usr/src/boringssl/.openssl/lib) \
 	\
