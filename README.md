@@ -17,8 +17,7 @@ This project is unstable state because of the rolling release **BoringSSL**, and
 #### Features
 
 - Images are used Alpine Linux.
-- NGINX built **BoringSSL** with SSE/SHA, and AVX2 SIMD-instructions.
-- **TLSv1.3** patch: use of TLSv1.3 (DRAFT) is enforced NGINX-1.13+.
+- NGINX built **BoringSSL**.
 - PCRE with JIT enabled.
 - HTTP/2.0 (+NPN) support.
 - Async I/O using threads support.
