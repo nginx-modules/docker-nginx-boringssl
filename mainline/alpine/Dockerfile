@@ -1,6 +1,6 @@
 FROM alpine:latest
 
-ENV NGINX_VERSION=1.25.1
+ENV NGINX_VERSION=1.25.2
 
 RUN GPG_KEYS=13C82A63B603576156E30A4EA0EA981B66B0D967 \
 	&& CONFIG="\
@@ -181,7 +181,7 @@ LABEL description="NGINX Docker built top of rolling release BoringSSL" \
       openssl="BoringSSL" \
       nginx="nginx $NGINX_VERSION"
 
-EXPOSE 80 443
+EXPOSE 80 443 443/udp
 
 STOPSIGNAL SIGTERM
 
