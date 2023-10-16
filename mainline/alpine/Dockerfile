@@ -54,6 +54,7 @@ RUN GPG_KEYS=13C82A63B603576156E30A4EA0EA981B66B0D967 \
 		--add-dynamic-module=/usr/src/ngx_headers_more \
 		--add-dynamic-module=/usr/src/ngx_brotli \
 		--add-dynamic-module=/usr/src/njs/nginx \
+		--add-dynamic-module=/usr/src/ModSecurity-nginx \
 	" \
 	&& addgroup -S nginx \
 	&& adduser -D -S -h /var/cache/nginx -s /sbin/nologin -G nginx nginx \
@@ -117,6 +118,17 @@ RUN GPG_KEYS=13C82A63B603576156E30A4EA0EA981B66B0D967 \
 		&& make -C/usr/src/boringssl/build -j$(getconf _NPROCESSORS_ONLN) \
 		&& cp /usr/src/boringssl/build/crypto/libcrypto.a /usr/src/boringssl/build/ssl/libssl.a /usr/src/boringssl/.openssl/lib) \
 	\
+	&& (git clone --depth=1 https://github.com/SpiderLabs/ModSecurity /usr/src/ModSecurity \
+		&& cd /usr/src/ModSecurity \
+		&& git submodule init \
+		&& git submodule update
+		&& ./build.sh \
+		&& ./configure \
+		&& make -j$(getconf _NPROCESSORS_ONLN) \
+		&& make -j$(getconf _NPROCESSORS_ONLN) install
+		&& strip -s /usr/local/modsecurity/lib/libmodsecurity.so.3) \
+	\
+	&& git clone --depth=1 https://github.com/SpiderLabs/ModSecurity-nginx /usr/src/ModSecurity-nginx \
 	&& tar -zxC /usr/src -f nginx.tar.gz \
 	&& rm nginx.tar.gz \
 	&& cd /usr/src/nginx-$NGINX_VERSION \
@@ -148,7 +160,7 @@ RUN GPG_KEYS=13C82A63B603576156E30A4EA0EA981B66B0D967 \
 	&& strip /usr/sbin/nginx* \
 	&& strip /usr/lib/nginx/modules/*.so \
 	&& rm -rf /usr/src/nginx-$NGINX_VERSION \
-	&& rm -rf /usr/src/boringssl /usr/src/ngx_* /usr/src/njs \
+	&& rm -rf /usr/src/boringssl /usr/src/ngx_* /usr/src/njs /usr/src/ModSecurity-nginx /usr/src/ModSecurity \
 	\
 	# Bring in gettext so we can get `envsubst`, then throw
 	# the rest away. To do this, we need to install `gettext`

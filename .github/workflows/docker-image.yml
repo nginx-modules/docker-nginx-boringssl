@@ -23,8 +23,8 @@ jobs:
         with:
           context: ./mainline/alpine
           push: true
-          tags: docker.io/denji/nginx-boringssl:mainline-alpine
-          cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:mainline-alpine
+          tags: docker.io/benedicthu/nginx-boringssl:mainline-alpine
+          cache-from: type=registry,ref=docker.io/benedicthu/nginx-boringssl:mainline-alpine
           cache-to: type=inline
       -
         name: Build and push stable/alpine
@@ -32,6 +32,6 @@ jobs:
         with:
           context: ./stable/alpine
           push: true
-          tags: docker.io/denji/nginx-boringssl:stable-alpine
-          cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:stable-alpine
+          tags: docker.io/benedicthu/nginx-boringssl:stable-alpine
+          cache-from: type=registry,ref=docker.io/benedicthu/nginx-boringssl:stable-alpine
           cache-to: type=inline
