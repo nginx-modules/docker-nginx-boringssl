@@ -49,8 +49,6 @@ RUN GPG_KEYS=D6786CE303D9A9022998DC6CC8464D549AF75C0A \
 		--with-file-aio \
 		--with-http_v2_module \
 		--with-http_v3_module \
-		--with-cc-opt=-I/usr/src/boringssl/.openssl/include \
-		--with-ld-opt=-L/usr/src/boringssl/.openssl/lib \
 		--add-dynamic-module=/usr/src/ngx_headers_more \
 		--add-dynamic-module=/usr/src/ngx_brotli \
 		--add-dynamic-module=/usr/src/njs/nginx \
@@ -88,8 +86,8 @@ RUN GPG_KEYS=D6786CE303D9A9022998DC6CC8464D549AF75C0A \
 		zlib \
 		zlib-dev \
 		mercurial \
-	&& curl -fSL https://nginx.org/download/nginx-$NGINX_VERSION.tar.gz -o nginx.tar.gz \
-	&& curl -fSL https://nginx.org/download/nginx-$NGINX_VERSION.tar.gz.asc  -o nginx.tar.gz.asc \
+	&& curl -fSL https://nginx.org/download/nginx-$NGINX_VERSION.tar.gz -o nginx-$NGINX_VERSION.tar.gz \
+	&& curl -fSL https://nginx.org/download/nginx-$NGINX_VERSION.tar.gz.asc  -o nginx-$NGINX_VERSION.tar.gz.asc \
 	&& export GNUPGHOME="$(mktemp -d)" \
 	&& found=''; \
 	for server in \
@@ -102,27 +100,26 @@ RUN GPG_KEYS=D6786CE303D9A9022998DC6CC8464D549AF75C0A \
 		gpg --keyserver "$server" --keyserver-options timeout=10 --recv-keys "$GPG_KEYS" && found=yes && break; \
 	done; \
 	test -z "$found" && echo >&2 "error: failed to fetch GPG key $GPG_KEYS" && exit 1; \
-	gpg --batch --verify nginx.tar.gz.asc nginx.tar.gz \
-	&& rm -rf "$GNUPGHOME" nginx.tar.gz.asc \
+	gpg --batch --verify nginx-$NGINX_VERSION.tar.gz.asc nginx-$NGINX_VERSION.tar.gz \
 	&& mkdir -p /usr/src \
-	\
+	&& tar -zxC /usr/src -f nginx-$NGINX_VERSION.tar.gz \
+	&& rm nginx-$NGINX_VERSION.tar.gz \
+	&& rm -rf "$GNUPGHOME" nginx-$NGINX_VERSION.tar.gz.asc \
 	&& git clone --depth=1 --recurse-submodules https://github.com/google/ngx_brotli /usr/src/ngx_brotli \
 	&& git clone --depth=1 https://github.com/openresty/headers-more-nginx-module /usr/src/ngx_headers_more \
 	&& hg clone http://hg.nginx.org/njs /usr/src/njs \
-	&& (git clone --depth=1 https://boringssl.googlesource.com/boringssl /usr/src/boringssl \
-		&& mkdir -p /usr/src/boringssl/build /usr/src/boringssl/.openssl/lib /usr/src/boringssl/.openssl/include \
-		&& ln -sf /usr/src/boringssl/include/openssl /usr/src/boringssl/.openssl/include/openssl \
-		&& touch /usr/src/boringssl/.openssl/include/openssl/ssl.h \
-		&& cmake -B/usr/src/boringssl/build -H/usr/src/boringssl -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+	&& (git clone https://boringssl.googlesource.com/boringssl /usr/src/boringssl \
+		&& cd /usr/src/boringssl && git checkout --force --quiet e648990 \
+		&& (grep -qxF 'SET_TARGET_PROPERTIES(crypto PROPERTIES SOVERSION 1)' /usr/src/boringssl/crypto/CMakeLists.txt || echo -e '\nSET_TARGET_PROPERTIES(crypto PROPERTIES SOVERSION 1)' >> /usr/src/boringssl/crypto/CMakeLists.txt) \
+		&& (grep -qxF 'SET_TARGET_PROPERTIES(ssl PROPERTIES SOVERSION 1)' /usr/src/boringssl/ssl/CMakeLists.txt || echo -e '\nSET_TARGET_PROPERTIES(ssl PROPERTIES SOVERSION 1)' >> /usr/src/boringssl/ssl/CMakeLists.txt) \
+		&& mkdir -p /usr/src/boringssl/build \
+		&& cmake -B/usr/src/boringssl/build -S/usr/src/boringssl -DCMAKE_BUILD_TYPE=RelWithDebInfo \
 		&& make -C/usr/src/boringssl/build -j$(getconf _NPROCESSORS_ONLN) \
-		&& cp /usr/src/boringssl/build/crypto/libcrypto.a /usr/src/boringssl/build/ssl/libssl.a /usr/src/boringssl/.openssl/lib) \
-	\
-	&& tar -zxC /usr/src -f nginx.tar.gz \
-	&& rm nginx.tar.gz \
+	   ) \
 	&& cd /usr/src/nginx-$NGINX_VERSION \
 	&& curl -fSL https://raw.githubusercontent.com/nginx-modules/ngx_http_tls_dyn_size/master/nginx__dynamic_tls_records_1.25.1%2B.patch -o dynamic_tls_records.patch \
 	&& patch -p1 < dynamic_tls_records.patch \
-	&& ./configure $CONFIG --with-debug \
+	&& ./configure $CONFIG --with-debug --with-cc-opt="-I/usr/src/boringssl/include" --with-ld-opt="-L/usr/src/boringssl/build/ssl -L/usr/src/boringssl/build/crypto" \
 	&& make -j$(getconf _NPROCESSORS_ONLN) \
 	&& mv objs/nginx objs/nginx-debug \
 	&& mv objs/ngx_http_xslt_filter_module.so objs/ngx_http_xslt_filter_module-debug.so \
@@ -130,7 +127,7 @@ RUN GPG_KEYS=D6786CE303D9A9022998DC6CC8464D549AF75C0A \
 	&& mv objs/ngx_http_geoip_module.so objs/ngx_http_geoip_module-debug.so \
 	&& mv objs/ngx_http_perl_module.so objs/ngx_http_perl_module-debug.so \
 	&& mv objs/ngx_stream_geoip_module.so objs/ngx_stream_geoip_module-debug.so \
-	&& ./configure $CONFIG \
+	&& ./configure $CONFIG --with-cc-opt="-I/usr/src/boringssl/include" --with-ld-opt="-L/usr/src/boringssl/build/ssl -L/usr/src/boringssl/build/crypto" \
 	&& make -j$(getconf _NPROCESSORS_ONLN) \
 	&& make install \
 	&& rm -rf /etc/nginx/html/ \
