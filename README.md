@@ -4,11 +4,19 @@
 
 [![](https://img.shields.io/docker/automated/denji/nginx-boringssl.svg)](https://hub.docker.com/r/denji/nginx-boringssl/builds/) [![](https://img.shields.io/docker/pulls/denji/nginx-boringssl.svg)](https://hub.docker.com/r/denji/nginx-boringssl/) [![](https://img.shields.io/docker/stars/denji/nginx-boringssl.svg)](https://hub.docker.com/r/denji/nginx-boringssl/)
 
-#### Build
+[![Docker Image CI](https://github.com/nginx-modules/docker-nginx-boringssl/actions/workflows/docker-image.yml/badge.svg)](https://github.com/nginx-modules/docker-nginx-boringssl/actions/workflows/docker-image.yml)
 
-[![](https://images.microbadger.com/badges/version/denji/nginx-boringssl:stable-alpine.svg)](https://microbadger.com/images/denji/nginx-boringssl:stable-alpine "denji/nginx-boringssl:stable-alpine") [![](https://images.microbadger.com/badges/image/denji/nginx-boringssl:stable-alpine.svg)](https://microbadger.com/images/denji/nginx-boringssl:stable-alpine "denji/nginx-boringssl:stable-alpine")
+### Supported tags and respective `Dockerfile` links
 
-[![](https://images.microbadger.com/badges/version/denji/nginx-boringssl:mainline-alpine.svg)](https://microbadger.com/images/denji/nginx-boringssl:mainline-alpine "nginx-boringssl:mainline-alpine") [![](https://images.microbadger.com/badges/image/denji/nginx-boringssl:mainline-alpine.svg)](https://microbadger.com/images/denji/nginx-boringssl:mainline-alpine "nginx-boringssl:mainline-alpine")
+* Stable Release
+  - `docker.io/denji/nginx-boringssl:stable-alpine` - (Linux x86_64-v4)
+  - `docker.io/denji/nginx-boringssl:stable-aarch64-alpine` - (Linux AArch64 - ARMv8)
+  - `docker.io/denji/nginx-boringssl:stable-armv7-alpine` - (Linux ARMv7 - 32-bit)
+
+* Mainline Release
+  - `docker.io/denji/nginx-boringssl:mainline-alpine` - (Linux x86_64-v4)
+  - `docker.io/denji/nginx-boringssl:mainline-aarch64-alpine` - (Linux AArch64 - ARMv8)
+  - `docker.io/denji/nginx-boringssl:mainline-armv7-alpine` - (Linux ARMv7 - 32-bit)
 
 #### Before you can use
 

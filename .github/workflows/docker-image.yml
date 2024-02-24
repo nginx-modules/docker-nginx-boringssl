@@ -3,6 +3,8 @@ name: Docker Image CI
 on:
   push:
     branches: [ main ]
+    paths-ignore:
+      - 'README.md'
 
 jobs:
   build-host-amd64v4:
@@ -33,7 +35,7 @@ jobs:
           tags: docker.io/denji/nginx-boringssl:stable-alpine
           cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:stable-alpine
           cache-to: type=inline
-  build-arm64:
+  build-qemu-arm64:
     runs-on: ubuntu-latest
     steps:
       - name: Check Out Repo
@@ -67,7 +69,7 @@ jobs:
           tags: docker.io/denji/nginx-boringssl:stable-aarch64-alpine
           cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:stable-aarch64-alpine
           cache-to: type=inline
-  build-armv7:
+  build-qemu-armv7:
     runs-on: ubuntu-latest
     steps:
       - name: Check Out Repo
@@ -101,7 +103,7 @@ jobs:
           tags: docker.io/denji/nginx-boringssl:stable-armv7-alpine
           cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:stable-armv7-alpine
           cache-to: type=inline
-  #build-armhf:
+  #build-qemu-armhf:
   #  runs-on: ubuntu-latest
   #  steps:
   #    - name: Check Out Repo
@@ -135,71 +137,71 @@ jobs:
   #        tags: docker.io/denji/nginx-boringssl:stable-armhf-alpine
   #        cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:stable-armhf-alpine
   #        cache-to: type=inline
-  build-s390x:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check Out Repo
-        uses: actions/checkout@v4
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Login to DockerHub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build and push mainline/alpine (Linux s390x - IBM System Z Based)
-        uses: docker/build-push-action@v5
-        with:
-          context: ./
-          file: mainline-alpine.Dockerfile
-          platforms: linux/s390x
-          push: true
-          tags: docker.io/denji/nginx-boringssl:mainline-s390x-alpine
-          cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:mainline-s390x-alpine
-          cache-to: type=inline
-      - name: Build and push stable/alpine (Linux s390x - IBM System Z Based)
-        uses: docker/build-push-action@v5
-        with:
-          context: ./
-          file: stable-alpine.Dockerfile
-          platforms: linux/s390x
-          push: true
-          tags: docker.io/denji/nginx-boringssl:stable-s390x-alpine
-          cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:stable-s390x-alpine
-          cache-to: type=inline
-  build-ppc64le:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check Out Repo
-        uses: actions/checkout@v4
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Login to DockerHub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build and push mainline/alpine (Linux ppc64le - 64-bit PowerPC little-endian)
-        uses: docker/build-push-action@v5
-        with:
-          context: ./
-          file: mainline-alpine.Dockerfile
-          platforms: linux/ppc64le
-          push: true
-          tags: docker.io/denji/nginx-boringssl:mainline-ppc64le-alpine
-          cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:mainline-ppc64le-alpine
-          cache-to: type=inline
-      - name: Build and push stable/alpine (Linux ppc64le - 64-bit PowerPC little-endian)
-        uses: docker/build-push-action@v5
-        with:
-          context: ./
-          file: stable-alpine.Dockerfile
-          platforms: linux/ppc64le
-          push: true
-          tags: docker.io/denji/nginx-boringssl:stable-ppc64le-alpine
-          cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:stable-ppc64le-alpine
-          cache-to: type=inline
+  #build-qemu-s390x:
+  #  runs-on: ubuntu-latest
+  #  steps:
+  #    - name: Check Out Repo
+  #      uses: actions/checkout@v4
+  #    - name: Set up QEMU
+  #      uses: docker/setup-qemu-action@v3
+  #    - name: Set up Docker Buildx
+  #      uses: docker/setup-buildx-action@v3
+  #    - name: Login to DockerHub
+  #      uses: docker/login-action@v3
+  #      with:
+  #        username: ${{ secrets.DOCKERHUB_USERNAME }}
+  #        password: ${{ secrets.DOCKERHUB_TOKEN }}
+  #    - name: Build and push mainline/alpine (Linux s390x - IBM System Z Based)
+  #      uses: docker/build-push-action@v5
+  #      with:
+  #        context: ./
+  #        file: mainline-alpine.Dockerfile
+  #        platforms: linux/s390x
+  #        push: true
+  #        tags: docker.io/denji/nginx-boringssl:mainline-s390x-alpine
+  #        cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:mainline-s390x-alpine
+  #        cache-to: type=inline
+  #    - name: Build and push stable/alpine (Linux s390x - IBM System Z Based)
+  #      uses: docker/build-push-action@v5
+  #      with:
+  #        context: ./
+  #        file: stable-alpine.Dockerfile
+  #        platforms: linux/s390x
+  #        push: true
+  #        tags: docker.io/denji/nginx-boringssl:stable-s390x-alpine
+  #        cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:stable-s390x-alpine
+  #        cache-to: type=inline
+  #build-qemu-ppc64le:
+  #  runs-on: ubuntu-latest
+  #  steps:
+  #    - name: Check Out Repo
+  #      uses: actions/checkout@v4
+  #    - name: Set up QEMU
+  #      uses: docker/setup-qemu-action@v3
+  #    - name: Set up Docker Buildx
+  #      uses: docker/setup-buildx-action@v3
+  #    - name: Login to DockerHub
+  #      uses: docker/login-action@v3
+  #      with:
+  #        username: ${{ secrets.DOCKERHUB_USERNAME }}
+  #        password: ${{ secrets.DOCKERHUB_TOKEN }}
+  #    - name: Build and push mainline/alpine (Linux ppc64le - 64-bit PowerPC little-endian)
+  #      uses: docker/build-push-action@v5
+  #      with:
+  #        context: ./
+  #        file: mainline-alpine.Dockerfile
+  #        platforms: linux/ppc64le
+  #        push: true
+  #        tags: docker.io/denji/nginx-boringssl:mainline-ppc64le-alpine
+  #        cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:mainline-ppc64le-alpine
+  #        cache-to: type=inline
+  #    - name: Build and push stable/alpine (Linux ppc64le - 64-bit PowerPC little-endian)
+  #      uses: docker/build-push-action@v5
+  #      with:
+  #        context: ./
+  #        file: stable-alpine.Dockerfile
+  #        platforms: linux/ppc64le
+  #        push: true
+  #        tags: docker.io/denji/nginx-boringssl:stable-ppc64le-alpine
+  #        cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:stable-ppc64le-alpine
+  #        cache-to: type=inline
