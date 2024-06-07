@@ -1,8 +1,8 @@
 FROM alpine:latest
 
-ENV NGINX_VERSION=1.24.0 
+ENV NGINX_VERSION=1.26.1
 
-RUN GPG_KEYS=13C82A63B603576156E30A4EA0EA981B66B0D967 \
+RUN GPG_KEYS=D6786CE303D9A9022998DC6CC8464D549AF75C0A \
 	&& CONFIG="\
 		--prefix=/etc/nginx \
 		--sbin-path=/usr/sbin/nginx \
@@ -48,8 +48,7 @@ RUN GPG_KEYS=13C82A63B603576156E30A4EA0EA981B66B0D967 \
 		--with-compat \
 		--with-file-aio \
 		--with-http_v2_module \
-		--with-cc-opt=-I/usr/src/boringssl/.openssl/include \
-		--with-ld-opt=-L/usr/src/boringssl/.openssl/lib \
+		--with-http_v3_module \
 		--add-dynamic-module=/usr/src/ngx_headers_more \
 		--add-dynamic-module=/usr/src/ngx_brotli \
 		--add-dynamic-module=/usr/src/njs/nginx \
@@ -118,7 +117,7 @@ RUN GPG_KEYS=13C82A63B603576156E30A4EA0EA981B66B0D967 \
 		&& make -C/usr/src/boringssl/build -j$(getconf _NPROCESSORS_ONLN) \
 	   ) \
 	&& cd /usr/src/nginx-$NGINX_VERSION \
-	&& curl -fSL https://raw.githubusercontent.com/nginx-modules/ngx_http_tls_dyn_size/0.5/nginx__dynamic_tls_records_1.17.7%2B.patch -o dynamic_tls_records.patch \
+	&& curl -fSL https://raw.githubusercontent.com/nginx-modules/ngx_http_tls_dyn_size/master/nginx__dynamic_tls_records_1.25.1%2B.patch -o dynamic_tls_records.patch \
 	&& patch -p1 < dynamic_tls_records.patch \
 	&& ./configure $CONFIG --with-debug --with-cc-opt="-I/usr/src/boringssl/include" --with-ld-opt="-L/usr/src/boringssl/build/ssl -L/usr/src/boringssl/build/crypto" \
 	&& make -j$(getconf _NPROCESSORS_ONLN) \
@@ -146,7 +145,7 @@ RUN GPG_KEYS=13C82A63B603576156E30A4EA0EA981B66B0D967 \
 	&& strip /usr/sbin/nginx* \
 	&& strip /usr/lib/nginx/modules/*.so \
 	&& rm -rf /usr/src/nginx-$NGINX_VERSION \
-	&& rm -rf /usr/src/boringssl /usr/src/ngx_* \
+	&& rm -rf /usr/src/boringssl /usr/src/ngx_* /usr/src/njs \
 	\
 	# Bring in gettext so we can get `envsubst`, then throw
 	# the rest away. To do this, we need to install `gettext`
@@ -182,7 +181,7 @@ LABEL description="NGINX Docker built top of rolling release BoringSSL" \
       nginx="nginx $NGINX_VERSION" \
       arch="$APK_ARCH"
 
-EXPOSE 80 443
+EXPOSE 80 443 443/udp
 
 STOPSIGNAL SIGTERM
 
