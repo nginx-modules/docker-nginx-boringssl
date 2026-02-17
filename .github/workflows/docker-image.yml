@@ -1,4 +1,4 @@
-name: Docker Image CI
+name: Docker Image CI (BoringSSL)
 
 on:
   push:
@@ -6,202 +6,142 @@ on:
     paths-ignore:
       - 'README.md'
 
+env:
+  GHCR_IMAGE: ghcr.io/${{ github.repository_owner }}/nginx-boringssl
+  DHUB_IMAGE: docker.io/denji/nginx-boringssl
+
 jobs:
-  build-host-amd64v4:
-    runs-on: ubuntu-latest
+  build:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # --- native runners (no QEMU) ---
+          - { platforms: linux/amd64,   build_dir: mainline, dockerfile: Dockerfile,             tag: mainline-amd64-alpine,    runner: ubuntu-latest     }
+          - { platforms: linux/arm64,   build_dir: mainline, dockerfile: Dockerfile,             tag: mainline-aarch64-alpine,  runner: ubuntu-24.04-arm  }
+          - { platforms: linux/amd64,   build_dir: stable,   dockerfile: Dockerfile,             tag: stable-amd64-alpine,      runner: ubuntu-latest     }
+          - { platforms: linux/arm64,   build_dir: stable,   dockerfile: Dockerfile,             tag: stable-aarch64-alpine,    runner: ubuntu-24.04-arm  }
+
+          # --- QEMU on arm64 runner ---
+          # arm/v7 and arm/v6: kernel compat layer (no TCG at all)
+          - { platforms: linux/arm/v7,  build_dir: mainline, dockerfile: Dockerfile,             tag: mainline-armv7-alpine,    runner: ubuntu-24.04-arm  }
+          - { platforms: linux/arm/v6,  build_dir: mainline, dockerfile: Dockerfile,             tag: mainline-armv6-alpine,    runner: ubuntu-24.04-arm  }
+          - { platforms: linux/ppc64le, build_dir: mainline, dockerfile: Dockerfile,             tag: mainline-ppc64le-alpine,  runner: ubuntu-24.04-arm  }
+          - { platforms: linux/riscv64, build_dir: mainline, dockerfile: Dockerfile,             tag: mainline-riscv64-alpine,  runner: ubuntu-24.04-arm  }
+          - { platforms: linux/loong64, build_dir: mainline, dockerfile: Dockerfile.loongarch64, tag: mainline-loong64-alpine,  runner: ubuntu-24.04-arm  }
+          #- { platforms: linux/mips64le, build_dir: mainline, dockerfile: Dockerfile.mips64le,  tag: mainline-mips64le-alpine, runner: ubuntu-24.04-arm  }
+          - { platforms: linux/arm/v7,  build_dir: stable,   dockerfile: Dockerfile,             tag: stable-armv7-alpine,      runner: ubuntu-24.04-arm  }
+          - { platforms: linux/arm/v6,  build_dir: stable,   dockerfile: Dockerfile,             tag: stable-armv6-alpine,      runner: ubuntu-24.04-arm  }
+          - { platforms: linux/ppc64le, build_dir: stable,   dockerfile: Dockerfile,             tag: stable-ppc64le-alpine,    runner: ubuntu-24.04-arm  }
+          - { platforms: linux/riscv64, build_dir: stable,   dockerfile: Dockerfile,             tag: stable-riscv64-alpine,    runner: ubuntu-24.04-arm  }
+          - { platforms: linux/loong64, build_dir: stable,   dockerfile: Dockerfile.loongarch64, tag: stable-loong64-alpine,    runner: ubuntu-24.04-arm  }
+          #- { platforms: linux/mips64le, build_dir: stable,  dockerfile: Dockerfile.mips64le,   tag: stable-mips64le-alpine,   runner: ubuntu-24.04-arm  }
+
+          # --- QEMU on x86 runner ---
+          # s390x: strong memory model (TSO-like) → needs x86 host for MTTCG
+          # Pinned to ubuntu-22.04: QEMU segfault regression in ubuntu-24.04 >= 20250202.1.0
+          # Track: https://github.com/actions/runner-images/issues/11662
+          #- { platforms: linux/s390x, build_dir: mainline, dockerfile: Dockerfile, tag: mainline-s390x-alpine, runner: ubuntu-22.04 }
+          #- { platforms: linux/s390x, build_dir: stable,   dockerfile: Dockerfile, tag: stable-s390x-alpine,   runner: ubuntu-22.04 }
+
+    permissions:
+      contents: read
+      packages: write
+
     steps:
       - name: Check Out Repo
-        uses: actions/checkout@v4
-      - name: Login to DockerHub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build and push mainline/alpine (Linux x86_64-v4)
-        uses: docker/build-push-action@v5
-        with:
-          context: ./
-          file: mainline-alpine.Dockerfile
-          push: true
-          tags: docker.io/denji/nginx-boringssl:mainline-alpine
-          cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:mainline-alpine
-          cache-to: type=inline
-      - name: Build and push stable/alpine (Linux x86_64-v4)
-        uses: docker/build-push-action@v5
-        with:
-          context: ./
-          file: stable-alpine.Dockerfile
-          push: true
-          tags: docker.io/denji/nginx-boringssl:stable-alpine
-          cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:stable-alpine
-          cache-to: type=inline
-  build-qemu-arm64:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check Out Repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+
       - name: Set up QEMU
+        if: matrix.platforms != 'linux/amd64' && matrix.platforms != 'linux/arm64'
         uses: docker/setup-qemu-action@v3
+        with:
+          # qemu-v9.2.0-51+ required for loong64 support
+          image: tonistiigi/binfmt:qemu-v10.1.3-60
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Login to DockerHub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build and push mainline/alpine (Linux AArch64 - ARMv8)
-        uses: docker/build-push-action@v5
+
+      - name: Build and push ${{ matrix.tag }}
+        uses: docker/build-push-action@v6
         with:
-          context: ./
-          file: mainline-alpine.Dockerfile
-          platforms: linux/arm64
+          context: ${{ matrix.build_dir }}
+          file: ${{ matrix.build_dir }}/${{ matrix.dockerfile }}
+          platforms: ${{ matrix.platforms }}
           push: true
-          tags: docker.io/denji/nginx-boringssl:mainline-aarch64-alpine
-          cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:mainline-aarch64-alpine
-          cache-to: type=inline
-      - name: Build and push stable/alpine (Linux AArch64 - ARMv8)
-        uses: docker/build-push-action@v5
-        with:
-          context: ./
-          file: stable-alpine.Dockerfile
-          platforms: linux/arm64
-          push: true
-          tags: docker.io/denji/nginx-boringssl:stable-aarch64-alpine
-          cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:stable-aarch64-alpine
-          cache-to: type=inline
-  build-qemu-armv7:
+          tags: |
+            ${{ env.GHCR_IMAGE }}:${{ matrix.tag }}
+            ${{ env.DHUB_IMAGE }}:${{ matrix.tag }}
+          #cache-from: type=registry,ref=${{ env.GHCR_IMAGE }}:cache-${{ matrix.tag }}
+          #cache-to: type=registry,ref=${{ env.GHCR_IMAGE }}:cache-${{ matrix.tag }},mode=max
+          cache-from: type=gha,scope=${{ matrix.tag }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.tag }}
+
+  merge:
     runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+      packages: write
     steps:
-      - name: Check Out Repo
-        uses: actions/checkout@v4
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: Login to DockerHub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build and push mainline/alpine (Linux ARMv7 - 32-bit)
-        uses: docker/build-push-action@v5
-        with:
-          context: ./
-          file: mainline-alpine.Dockerfile
-          platforms: linux/arm/v7
-          push: true
-          tags: docker.io/denji/nginx-boringssl:mainline-armv7-alpine
-          cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:mainline-armv7-alpine
-          cache-to: type=inline
-      - name: Build and push stable/alpine (Linux ARMv7 - 32-bit)
-        uses: docker/build-push-action@v5
-        with:
-          context: ./
-          file: stable-alpine.Dockerfile
-          platforms: linux/arm/v7
-          push: true
-          tags: docker.io/denji/nginx-boringssl:stable-armv7-alpine
-          cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:stable-armv7-alpine
-          cache-to: type=inline
-  #build-qemu-armhf:
-  #  runs-on: ubuntu-latest
-  #  steps:
-  #    - name: Check Out Repo
-  #      uses: actions/checkout@v4
-  #    - name: Set up QEMU
-  #      uses: docker/setup-qemu-action@v3
-  #    - name: Set up Docker Buildx
-  #      uses: docker/setup-buildx-action@v3
-  #    - name: Login to DockerHub
-  #      uses: docker/login-action@v3
-  #      with:
-  #        username: ${{ secrets.DOCKERHUB_USERNAME }}
-  #        password: ${{ secrets.DOCKERHUB_TOKEN }}
-  #    - name: Build and push mainline/alpine (Linux armhf - 32-bit hard-float ABI ARMv6)
-  #      uses: docker/build-push-action@v5
-  #      with:
-  #        context: ./
-  #        file: mainline-alpine.Dockerfile
-  #        platforms: linux/arm/v6
-  #        push: true
-  #        tags: docker.io/denji/nginx-boringssl:mainline-armhf-alpine
-  #        cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:mainline-armhf-alpine
-  #        cache-to: type=inline
-  #    - name: Build and push stable/alpine (Linux armhf - 32-bit hard-float ABI ARMv6)
-  #      uses: docker/build-push-action@v5
-  #      with:
-  #        context: ./
-  #        file: stable-alpine.Dockerfile
-  #        platforms: linux/arm/v6
-  #        push: true
-  #        tags: docker.io/denji/nginx-boringssl:stable-armhf-alpine
-  #        cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:stable-armhf-alpine
-  #        cache-to: type=inline
-  #build-qemu-s390x:
-  #  runs-on: ubuntu-latest
-  #  steps:
-  #    - name: Check Out Repo
-  #      uses: actions/checkout@v4
-  #    - name: Set up QEMU
-  #      uses: docker/setup-qemu-action@v3
-  #    - name: Set up Docker Buildx
-  #      uses: docker/setup-buildx-action@v3
-  #    - name: Login to DockerHub
-  #      uses: docker/login-action@v3
-  #      with:
-  #        username: ${{ secrets.DOCKERHUB_USERNAME }}
-  #        password: ${{ secrets.DOCKERHUB_TOKEN }}
-  #    - name: Build and push mainline/alpine (Linux s390x - IBM System Z Based)
-  #      uses: docker/build-push-action@v5
-  #      with:
-  #        context: ./
-  #        file: mainline-alpine.Dockerfile
-  #        platforms: linux/s390x
-  #        push: true
-  #        tags: docker.io/denji/nginx-boringssl:mainline-s390x-alpine
-  #        cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:mainline-s390x-alpine
-  #        cache-to: type=inline
-  #    - name: Build and push stable/alpine (Linux s390x - IBM System Z Based)
-  #      uses: docker/build-push-action@v5
-  #      with:
-  #        context: ./
-  #        file: stable-alpine.Dockerfile
-  #        platforms: linux/s390x
-  #        push: true
-  #        tags: docker.io/denji/nginx-boringssl:stable-s390x-alpine
-  #        cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:stable-s390x-alpine
-  #        cache-to: type=inline
-  #build-qemu-ppc64le:
-  #  runs-on: ubuntu-latest
-  #  steps:
-  #    - name: Check Out Repo
-  #      uses: actions/checkout@v4
-  #    - name: Set up QEMU
-  #      uses: docker/setup-qemu-action@v3
-  #    - name: Set up Docker Buildx
-  #      uses: docker/setup-buildx-action@v3
-  #    - name: Login to DockerHub
-  #      uses: docker/login-action@v3
-  #      with:
-  #        username: ${{ secrets.DOCKERHUB_USERNAME }}
-  #        password: ${{ secrets.DOCKERHUB_TOKEN }}
-  #    - name: Build and push mainline/alpine (Linux ppc64le - 64-bit PowerPC little-endian)
-  #      uses: docker/build-push-action@v5
-  #      with:
-  #        context: ./
-  #        file: mainline-alpine.Dockerfile
-  #        platforms: linux/ppc64le
-  #        push: true
-  #        tags: docker.io/denji/nginx-boringssl:mainline-ppc64le-alpine
-  #        cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:mainline-ppc64le-alpine
-  #        cache-to: type=inline
-  #    - name: Build and push stable/alpine (Linux ppc64le - 64-bit PowerPC little-endian)
-  #      uses: docker/build-push-action@v5
-  #      with:
-  #        context: ./
-  #        file: stable-alpine.Dockerfile
-  #        platforms: linux/ppc64le
-  #        push: true
-  #        tags: docker.io/denji/nginx-boringssl:stable-ppc64le-alpine
-  #        cache-from: type=registry,ref=docker.io/denji/nginx-boringssl:stable-ppc64le-alpine
-  #        cache-to: type=inline
+
+      - name: Merge and push mainline-alpine manifest
+        run: |
+          docker buildx imagetools create -t ${{ env.GHCR_IMAGE }}:mainline-alpine \
+            ${{ env.GHCR_IMAGE }}:mainline-amd64-alpine \
+            ${{ env.GHCR_IMAGE }}:mainline-aarch64-alpine \
+            ${{ env.GHCR_IMAGE }}:mainline-armv7-alpine \
+            ${{ env.GHCR_IMAGE }}:mainline-armv6-alpine \
+            ${{ env.GHCR_IMAGE }}:mainline-ppc64le-alpine \
+            ${{ env.GHCR_IMAGE }}:mainline-riscv64-alpine \
+            ${{ env.GHCR_IMAGE }}:mainline-loong64-alpine
+          #  ${{ env.GHCR_IMAGE }}:mainline-s390x-alpine
+          #  ${{ env.GHCR_IMAGE }}:mainline-mips64le-alpine
+
+          docker buildx imagetools create -t ${{ env.DHUB_IMAGE }}:mainline-alpine \
+            ${{ env.GHCR_IMAGE }}:mainline-alpine
+
+      - name: Merge and push stable-alpine manifest
+        run: |
+          docker buildx imagetools create -t ${{ env.GHCR_IMAGE }}:stable-alpine \
+            ${{ env.GHCR_IMAGE }}:stable-amd64-alpine \
+            ${{ env.GHCR_IMAGE }}:stable-aarch64-alpine \
+            ${{ env.GHCR_IMAGE }}:stable-armv7-alpine \
+            ${{ env.GHCR_IMAGE }}:stable-armv6-alpine \
+            ${{ env.GHCR_IMAGE }}:stable-ppc64le-alpine \
+            ${{ env.GHCR_IMAGE }}:stable-riscv64-alpine \
+            ${{ env.GHCR_IMAGE }}:stable-loong64-alpine
+          #  ${{ env.GHCR_IMAGE }}:stable-s390x-alpine
+          #  ${{ env.GHCR_IMAGE }}:stable-mips64le-alpine
+
+          docker buildx imagetools create -t ${{ env.DHUB_IMAGE }}:stable-alpine \
+            ${{ env.GHCR_IMAGE }}:stable-alpine
