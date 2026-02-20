@@ -22,9 +22,11 @@ Images are published to both registries:
 
 | Tag pattern | Architectures |
 |-------------|---------------|
-| `stable-alpine`, `mainline-alpine` | x86_64, ~~ARMv6/7 (32-bit)~~, AArch64 (ARMv8), ~~RISC-V64, LoongArch64, PPC64LE~~ |
+| `stable-alpine`, `mainline-alpine` | x86_64, ARMv6/7 (32-bit), AArch64 (ARMv8), RISC-V64 |
 | `stable-aarch64-alpine`, `mainline-aarch64-alpine` | AArch64 (ARMv8) |
+| `stable-armv6-alpine`, `mainline-armv6-alpine` | ARMv6 (32-bit) |
 | `stable-armv7-alpine`, `mainline-armv7-alpine` | ARMv7 (32-bit) |
+| `stable-riscv64-alpine`, `mainline-riscv64-alpine` | RISC-V 64 |
 
 ---
 

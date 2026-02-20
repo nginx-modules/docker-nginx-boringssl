@@ -27,15 +27,15 @@ jobs:
           # arm/v7 and arm/v6: kernel compat layer (no TCG at all)
           - { platforms: linux/arm/v7,  build_dir: mainline, dockerfile: Dockerfile,             tag: mainline-armv7-alpine,    runner: ubuntu-24.04-arm  }
           - { platforms: linux/arm/v6,  build_dir: mainline, dockerfile: Dockerfile,             tag: mainline-armv6-alpine,    runner: ubuntu-24.04-arm  }
-          - { platforms: linux/ppc64le, build_dir: mainline, dockerfile: Dockerfile,             tag: mainline-ppc64le-alpine,  runner: ubuntu-24.04-arm  }
+          #- { platforms: linux/ppc64le, build_dir: mainline, dockerfile: Dockerfile,             tag: mainline-ppc64le-alpine,  runner: ubuntu-24.04-arm  }
           - { platforms: linux/riscv64, build_dir: mainline, dockerfile: Dockerfile,             tag: mainline-riscv64-alpine,  runner: ubuntu-24.04-arm  }
-          - { platforms: linux/loong64, build_dir: mainline, dockerfile: Dockerfile.loongarch64, tag: mainline-loong64-alpine,  runner: ubuntu-24.04-arm  }
+          #- { platforms: linux/loong64, build_dir: mainline, dockerfile: Dockerfile.loongarch64, tag: mainline-loong64-alpine,  runner: ubuntu-24.04-arm  }
           #- { platforms: linux/mips64le, build_dir: mainline, dockerfile: Dockerfile.mips64le,  tag: mainline-mips64le-alpine, runner: ubuntu-24.04-arm  }
           - { platforms: linux/arm/v7,  build_dir: stable,   dockerfile: Dockerfile,             tag: stable-armv7-alpine,      runner: ubuntu-24.04-arm  }
           - { platforms: linux/arm/v6,  build_dir: stable,   dockerfile: Dockerfile,             tag: stable-armv6-alpine,      runner: ubuntu-24.04-arm  }
-          - { platforms: linux/ppc64le, build_dir: stable,   dockerfile: Dockerfile,             tag: stable-ppc64le-alpine,    runner: ubuntu-24.04-arm  }
+          #- { platforms: linux/ppc64le, build_dir: stable,   dockerfile: Dockerfile,             tag: stable-ppc64le-alpine,    runner: ubuntu-24.04-arm  }
           - { platforms: linux/riscv64, build_dir: stable,   dockerfile: Dockerfile,             tag: stable-riscv64-alpine,    runner: ubuntu-24.04-arm  }
-          - { platforms: linux/loong64, build_dir: stable,   dockerfile: Dockerfile.loongarch64, tag: stable-loong64-alpine,    runner: ubuntu-24.04-arm  }
+          #- { platforms: linux/loong64, build_dir: stable,   dockerfile: Dockerfile.loongarch64, tag: stable-loong64-alpine,    runner: ubuntu-24.04-arm  }
           #- { platforms: linux/mips64le, build_dir: stable,  dockerfile: Dockerfile.mips64le,   tag: stable-mips64le-alpine,   runner: ubuntu-24.04-arm  }
 
           # --- QEMU on x86 runner ---
@@ -58,7 +58,7 @@ jobs:
         uses: docker/setup-qemu-action@v3
         with:
           # qemu-v9.2.0-51+ required for loong64 support
-          image: tonistiigi/binfmt:qemu-v10.1.3-60
+          image: tonistiigi/binfmt:qemu-v10.2.1-65
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -121,9 +121,9 @@ jobs:
             ${{ env.GHCR_IMAGE }}:mainline-aarch64-alpine \
             ${{ env.GHCR_IMAGE }}:mainline-armv7-alpine \
             ${{ env.GHCR_IMAGE }}:mainline-armv6-alpine \
-            ${{ env.GHCR_IMAGE }}:mainline-ppc64le-alpine \
             ${{ env.GHCR_IMAGE }}:mainline-riscv64-alpine \
-            ${{ env.GHCR_IMAGE }}:mainline-loong64-alpine
+          #  ${{ env.GHCR_IMAGE }}:mainline-loong64-alpine
+          #  ${{ env.GHCR_IMAGE }}:mainline-ppc64le-alpine
           #  ${{ env.GHCR_IMAGE }}:mainline-s390x-alpine
           #  ${{ env.GHCR_IMAGE }}:mainline-mips64le-alpine
 
@@ -137,9 +137,9 @@ jobs:
             ${{ env.GHCR_IMAGE }}:stable-aarch64-alpine \
             ${{ env.GHCR_IMAGE }}:stable-armv7-alpine \
             ${{ env.GHCR_IMAGE }}:stable-armv6-alpine \
-            ${{ env.GHCR_IMAGE }}:stable-ppc64le-alpine \
             ${{ env.GHCR_IMAGE }}:stable-riscv64-alpine \
-            ${{ env.GHCR_IMAGE }}:stable-loong64-alpine
+          #  ${{ env.GHCR_IMAGE }}:stable-loong64-alpine
+          #  ${{ env.GHCR_IMAGE }}:stable-ppc64le-alpine
           #  ${{ env.GHCR_IMAGE }}:stable-s390x-alpine
           #  ${{ env.GHCR_IMAGE }}:stable-mips64le-alpine
 
