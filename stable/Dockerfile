@@ -116,7 +116,7 @@ RUN set -eux \
     && curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz.asc" -o nginx.tar.gz.asc \
     \
     # -- GPG: fetch nginx signing keys (keyserver fallback chain) --------------
-    && GPG_KEYS="43387825DDB1BB97EC36BA5D007C8D7C15D87369" \
+    && GPG_KEYS="43387825DDB1BB97EC36BA5D007C8D7C15D87369 D6786CE303D9A9022998DC6CC8464D549AF75C0A" \
     && GNUPGHOME="$(mktemp -d)" \
     && export GNUPGHOME \
     && for server in \
@@ -132,8 +132,9 @@ RUN set -eux \
            && break || true; \
        done \
     \
-    # -- GPG: per-key fallback — always import NGINX key directly -------------
+    # -- GPG: per-key fallback — import nginx bundle + Kandaurov key directly --
     && curl -fsSL https://nginx.org/keys/nginx_signing.key | gpg --import \
+    && curl -fsSL https://nginx.org/keys/pluknet.key     | gpg --import \
     \
     # -- GPG: verify every required key is present in the keyring -------------
     && for key in ${GPG_KEYS}; do \
