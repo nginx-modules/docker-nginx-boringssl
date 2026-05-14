@@ -18,7 +18,7 @@ FROM alpine:latest
 
 # FROM alpine:3.18    # Legacy support; stable but nearing End-of-Life (EOL)
 
-ENV NGINX_VERSION=1.28.3
+ENV NGINX_VERSION=1.30.1
 
 ENV CONFIG="\
     --prefix=/etc/nginx \
