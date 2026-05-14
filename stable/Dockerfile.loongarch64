@@ -173,7 +173,7 @@ RUN set -eux \
     # -- Patch -----------------------------------------------------------------
     && cd /usr/src/nginx-${NGINX_VERSION} \
     && curl -fsSL \
-           "https://raw.githubusercontent.com/nginx-modules/ngx_http_tls_dyn_size/refs/heads/master/nginx__dynamic_tls_records_1.27.5%2B.patch" \
+           "https://raw.githubusercontent.com/nginx-modules/ngx_http_tls_dyn_size/refs/heads/master/nginx__dynamic_tls_records_1.29.2%2B.patch" \
            -o dynamic_tls_records.patch \
     && patch -p1 < dynamic_tls_records.patch \
     && rm dynamic_tls_records.patch \
