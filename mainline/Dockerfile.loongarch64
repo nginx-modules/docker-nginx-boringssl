@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 FROM --platform=linux/loong64 loongarch64/alpine:3.21
 
-ENV NGINX_VERSION=1.31.1
+ENV NGINX_VERSION=1.31.2
 
 ENV CONFIG="\
     --prefix=/etc/nginx \
