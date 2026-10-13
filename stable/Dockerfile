@@ -19,6 +19,7 @@ FROM alpine:latest
 # FROM alpine:3.18    # Legacy support; stable but nearing End-of-Life (EOL)
 
 ENV NGINX_VERSION=1.30.5
+ENV BORINGSSL_TAG=0.20260929.0
 
 ENV CONFIG="\
     --prefix=/etc/nginx \
@@ -162,7 +163,7 @@ RUN set -eux \
     # -- Build BoringSSL via CMake ---------------------------------------------
     && git clone https://boringssl.googlesource.com/boringssl /usr/src/boringssl \
     && cd /usr/src/boringssl \
-    && git checkout --force --quiet '0.20260211.0' \
+    && git checkout --force --quiet "${BORINGSSL_TAG}" \
     && cmake -B/usr/src/boringssl/build -S/usr/src/boringssl \
         -DCMAKE_BUILD_TYPE=RelWithDebInfo \
         -DCMAKE_CXX_STANDARD=17 \
