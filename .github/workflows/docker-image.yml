@@ -51,14 +51,14 @@ jobs:
 
     steps:
       - name: Check Out Repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up QEMU
         if: matrix.platforms != 'linux/amd64' && matrix.platforms != 'linux/arm64'
         uses: docker/setup-qemu-action@v4
         with:
           # qemu-v9.2.0-51+ required for loong64 support
-          image: tonistiigi/binfmt:qemu-v10.2.1-65
+          image: tonistiigi/binfmt:qemu-v10.2.3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
