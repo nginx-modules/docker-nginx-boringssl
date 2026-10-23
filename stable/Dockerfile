@@ -19,7 +19,7 @@ FROM alpine:latest
 # FROM alpine:3.18    # Legacy support; stable but nearing End-of-Life (EOL)
 
 ENV NGINX_VERSION=1.30.6
-ENV BORINGSSL_TAG=0.20260929.0
+ENV BORINGSSL_TAG=0.20261020.0
 
 ENV CONFIG="\
     --prefix=/etc/nginx \
