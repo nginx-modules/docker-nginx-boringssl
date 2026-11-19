@@ -79,6 +79,13 @@ This project is currently in an **experimental state** due to the continuously e
   ```
 - **Metadata**: `org.opencontainers.image.created` is the commit time and `revision` the full commit SHA, both as image-config labels and as index annotations.
 
+## Image layout and build speed
+
+- The published image is a **single layer**: the Dockerfile builds in parallel stages (BoringSSL, nginx release, nginx debug) and the final stage is a flattened copy of the runtime root filesystem. The release workflow fails if a built image has more than one layer.
+- BoringSSL lives in its own stage, so an nginx / module / patch bump does not rebuild it. Build cache is stored in GHCR (`buildcache-*` tags), and LTO uses `-flto=auto` (parallel link).
+- Releases are queued, never cancelled: every commit is published in commit order, and the merge job refuses to move a tag backwards (e.g. a stale re-run of an older commit).
+- `tools/compare-images.sh <old> <new>` compares runtime config and filesystem of two images (use it after changing the Dockerfile layout).
+
 ## Reproducibility
 
 Build inputs are pinned: Alpine base digest, BoringSSL commit, ngx_brotli / headers-more / njs commits, and the dynamic-TLS patch (commit + sha256). File timestamps are clamped to the commit time (`SOURCE_DATE_EPOCH`, `rewrite-timestamp`).

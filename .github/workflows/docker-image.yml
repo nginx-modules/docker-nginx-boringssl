@@ -20,6 +20,10 @@ env:
 #     -> merge: GHCR index + OCI annotations -> verify -> cosign sign -> cosign verify
 #       -> signed SLSA provenance attestation (GitHub) -> gh attestation verify
 #       -> Docker Hub: copy by digest -> verify digest -> cosign sign -> cosign verify -> attest
+# Ordering: runs are queued (`queue: max`) and never cancelled, so every commit is released
+# in commit order, one run after the other. Build jobs push images BY DIGEST only; all
+# mutable tags (per-arch, *-alpine) are written exclusively by the merge job, after a guard
+# that refuses to move a tag backwards (e.g. a stale re-run of an old commit).
 # Per-arch images carry buildkit provenance (mode=max) + SBOM attestations; timestamps are
 # derived from the commit (SOURCE_DATE_EPOCH) so identical inputs give comparable output.
 # See reproducibility.yml for the (separate, non-gating) rebuild-and-compare check.
@@ -124,19 +128,21 @@ jobs:
           context: ${{ matrix.build_dir }}
           file: ${{ matrix.build_dir }}/${{ matrix.dockerfile }}
           platforms: ${{ matrix.platforms }}
-          # type=registry == push; rewrite-timestamp clamps file mtimes to SOURCE_DATE_EPOCH
-          outputs: type=registry,rewrite-timestamp=true
-          tags: ${{ env.GHCR_IMAGE }}:${{ matrix.tag }}
+          # Push by digest only (no mutable tag from the build job). rewrite-timestamp clamps
+          # file mtimes to SOURCE_DATE_EPOCH. The final image is a single layer (Dockerfile).
+          outputs: type=image,name=${{ env.GHCR_IMAGE }},push-by-digest=true,name-canonical=true,push=true,rewrite-timestamp=true
           provenance: mode=max
           sbom: true
           build-args: |
             BUILD_DATE=${{ needs.prepare.outputs.build_date }}
             VCS_REF=${{ needs.prepare.outputs.vcs_ref }}
             SOURCE_DATE_EPOCH=${{ needs.prepare.outputs.source_date_epoch }}
-          #cache-from: type=registry,ref=${{ env.GHCR_IMAGE }}:cache-${{ matrix.tag }}
-          #cache-to: type=registry,ref=${{ env.GHCR_IMAGE }}:cache-${{ matrix.tag }},mode=max
-          cache-from: type=gha,scope=${{ matrix.tag }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.tag }}
+          # Registry cache on GHCR (no 10 GB gha limit / eviction). mode=max exports every
+          # stage, so the BoringSSL stage is reused across commits. image-manifest +
+          # oci-mediatypes are required by GHCR; ignore-error: a cache export failure must
+          # never fail a release build.
+          cache-from: type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache-${{ matrix.tag }}
+          cache-to: type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache-${{ matrix.tag }},mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true
 
       # The merge job consumes immutable digests, not the mutable per-arch tags:
       # a concurrent/later run can no longer swap an image between build and merge.
@@ -185,6 +191,8 @@ jobs:
     steps:
       - name: Check Out Repo
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # ancestry check in the out-of-order guard
 
       - name: Download digests
         uses: actions/download-artifact@v4
@@ -209,11 +217,33 @@ jobs:
       # ----------------------------------------------------------------------------
       # Stage 1: GHCR — merge, annotate, verify, sign, verify signature
       # ----------------------------------------------------------------------------
+      # Never move a published tag backwards: refuse if the revision currently published
+      # for this release is NOT an ancestor of (or equal to) the commit being released
+      # (stale re-run of an old commit, or a mis-ordered queue). Fails loudly by design.
+      - name: Guard against out-of-order publish
+        run: |
+          set -euo pipefail
+          ref="${GHCR_IMAGE}:${RELEASE}-alpine"
+          cur="$(docker buildx imagetools inspect --raw "${ref}" 2>/dev/null \
+                 | jq -r '.annotations["org.opencontainers.image.revision"] // empty' || true)"
+          if [[ -z "${cur}" ]]; then
+            echo "no published revision for ${ref} (first release or pre-annotation image): proceeding"
+          elif [[ "${cur}" == "${VCS_REF}" ]]; then
+            echo "re-releasing the same revision ${cur}: proceeding"
+          elif ! git cat-file -e "${cur}^{commit}" 2>/dev/null; then
+            echo "::warning::published revision ${cur} is not in this checkout's history (rewritten history?); proceeding"
+          elif git merge-base --is-ancestor "${cur}" "${VCS_REF}"; then
+            echo "published ${cur} is an ancestor of ${VCS_REF}: proceeding"
+          else
+            echo "::error::refusing to publish ${VCS_REF}: ${ref} already carries ${cur}, which is not an ancestor"
+            exit 1
+          fi
+
       - name: Merge ${{ matrix.release }}-alpine manifest (GHCR)
         run: |
           set -euo pipefail
 
-          nginx_version="$(sed -n 's/^ENV NGINX_VERSION=//p' "${RELEASE}/Dockerfile")"
+          nginx_version="$(sed -n 's/^ARG NGINX_VERSION=//p' "${RELEASE}/Dockerfile")"
           [[ -n "${nginx_version}" ]] || { echo "::error::cannot read NGINX_VERSION from ${RELEASE}/Dockerfile"; exit 1; }
 
           shopt -s nullglob
@@ -246,6 +276,12 @@ jobs:
           )
 
           retry() { local n=0; until "$@"; do n=$((n+1)); (( n >= 3 )) && return 1; echo "retry ${n}/3: $*"; sleep $((n*10)); done; }
+
+          # per-arch tags (kept for backward compatibility) point at the exact built digests
+          for f in "${files[@]}"; do
+            read -r _ d < "${f}"
+            retry docker buildx imagetools create --tag "${GHCR_IMAGE}:${f##*/}" "${GHCR_IMAGE}@${d}"
+          done
 
           retry docker buildx imagetools create \
             --tag "${GHCR_IMAGE}:${RELEASE}-alpine" \
@@ -301,6 +337,9 @@ jobs:
                 | all(.["org.opencontainers.image.created"] == $c and .["org.opencontainers.image.revision"] == $r)
               ' <<< "${cfg}" > /dev/null \
               || { echo "::error::image config labels created/revision missing or wrong"; jq -c '[.. | objects | select(has("config")) | .config.Labels]' <<< "${cfg}"; exit 1; }
+            # the published image must consist of exactly one layer
+            jq -e '[.. | objects | select(has("rootfs")) | .rootfs.diff_ids | length] | length > 0 and all(. == 1)' <<< "${cfg}" > /dev/null \
+              || { echo "::error::image is not a single layer"; jq -c '[.. | objects | select(has("rootfs")) | .rootfs.diff_ids | length]' <<< "${cfg}"; exit 1; }
           else
             echo "::warning::could not read image configs via imagetools; config-label check skipped"
           fi
