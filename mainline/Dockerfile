@@ -82,6 +82,8 @@ ARG CONFIG="\
 # LTO: =auto lets GCC run the link-time partitions in parallel (plain -flto is serial
 # unless a make jobserver is passed down).
 ARG LTO_FLAGS="-flto=auto -fno-fat-lto-objects"
+ARG HARDENING_CFLAGS="-fstack-clash-protection -Wformat -Werror=format-security -fno-plt -g"
+ARG HARDENING_LDFLAGS="-Wl,--as-needed,-O1,--sort-common -Wl,-z,relro,-z,now -Wl,-z,pack-relative-relocs"
 
 # -----------------------------------------------------------------------------
 # ALPINE VERSION SELECTION HISTORY
@@ -130,8 +132,8 @@ RUN set -eux \
         linux-headers \
         make \
         mercurial \
-        pcre \
-        pcre-dev \
+        pcre2 \
+        pcre2-dev \
         perl-dev \
         su-exec \
         tar \
@@ -146,6 +148,7 @@ FROM toolchain AS boringssl-build
 ARG BORINGSSL_TAG
 ARG BORINGSSL_COMMIT
 ARG LTO_FLAGS
+ARG HARDENING_CFLAGS
 RUN set -eux \
     && git clone https://boringssl.googlesource.com/boringssl /usr/src/boringssl \
     && cd /usr/src/boringssl \
@@ -157,8 +160,9 @@ RUN set -eux \
         -DCMAKE_CXX_STANDARD=17 \
         -DCMAKE_CXX_STANDARD_REQUIRED=ON \
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-        -DCMAKE_C_FLAGS="${LTO_FLAGS} -Wno-error=array-bounds -Wno-error=stringop-overread" \
-        -DCMAKE_CXX_FLAGS="${LTO_FLAGS} -Wno-error=array-bounds -Wno-error=stringop-overread" \
+        -DCMAKE_C_FLAGS="${LTO_FLAGS} ${HARDENING_CFLAGS} -Wno-error=array-bounds -Wno-error=stringop-overread" \
+        -DCMAKE_CXX_FLAGS="${LTO_FLAGS} ${HARDENING_CFLAGS} -Wno-error=array-bounds -Wno-error=stringop-overread" \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
         -DBUILD_TESTING=OFF \
     && cmake --build /usr/src/boringssl/build \
         --target ssl crypto \
@@ -270,16 +274,18 @@ FROM nginx-src AS build-release
 ARG NGINX_VERSION
 ARG CONFIG
 ARG LTO_FLAGS
+ARG HARDENING_CFLAGS
+ARG HARDENING_LDFLAGS
 COPY --from=boringssl /usr/src/boringssl /usr/src/boringssl
 RUN set -eux \
     && cd /usr/src/nginx-${NGINX_VERSION} \
     # --with-openssl points nginx to our pre-built BoringSSL; the detector finds
     # .openssl/include/openssl/ssl.h and considers SSL "already built".
-    # -lstdc++ links the C++ runtime required by BoringSSL's static archives.
+    # -lstdc++ and -shared-libgcc keep C++/GCC runtime dynamically linked.
     && ./configure ${CONFIG} \
         --with-openssl="/usr/src/boringssl" \
-        --with-cc-opt="-I/usr/src/boringssl/.openssl/include -DNGX_QUIC_OPENSSL_COMPAT=0 ${LTO_FLAGS}" \
-        --with-ld-opt="-L/usr/src/boringssl/.openssl/lib -flto=auto -lstdc++ -lgcc_s" \
+        --with-cc-opt="-I/usr/src/boringssl/.openssl/include -DNGX_QUIC_OPENSSL_COMPAT=0 -O2 ${HARDENING_CFLAGS} ${LTO_FLAGS}" \
+        --with-ld-opt="-L/usr/src/boringssl/.openssl/lib -flto=auto ${HARDENING_LDFLAGS} -lstdc++ -shared-libgcc" \
     && touch /usr/src/boringssl/.openssl/include/openssl/ssl.h \
     && make -j"$(getconf _NPROCESSORS_ONLN)" \
     && make install \
@@ -302,13 +308,15 @@ FROM nginx-src AS build-debug
 ARG NGINX_VERSION
 ARG CONFIG
 ARG LTO_FLAGS
+ARG HARDENING_CFLAGS
+ARG HARDENING_LDFLAGS
 COPY --from=boringssl /usr/src/boringssl /usr/src/boringssl
 RUN set -eux \
     && cd /usr/src/nginx-${NGINX_VERSION} \
     && ./configure ${CONFIG} --with-debug \
         --with-openssl="/usr/src/boringssl" \
-        --with-cc-opt="-I/usr/src/boringssl/.openssl/include -DNGX_QUIC_OPENSSL_COMPAT=0 ${LTO_FLAGS}" \
-        --with-ld-opt="-L/usr/src/boringssl/.openssl/lib -flto=auto -lstdc++ -lgcc_s" \
+        --with-cc-opt="-I/usr/src/boringssl/.openssl/include -DNGX_QUIC_OPENSSL_COMPAT=0 -O2 ${HARDENING_CFLAGS} ${LTO_FLAGS}" \
+        --with-ld-opt="-L/usr/src/boringssl/.openssl/lib -flto=auto ${HARDENING_LDFLAGS} -lstdc++ -shared-libgcc" \
     && touch /usr/src/boringssl/.openssl/include/openssl/ssl.h \
     && make -j"$(getconf _NPROCESSORS_ONLN)" \
     && mv objs/nginx                           objs/nginx-debug \
@@ -356,7 +364,7 @@ RUN set -eux \
     && apk add --no-cache --virtual .nginx-rundeps-bootstrap \
         libgcc \
         libstdc++ \
-        pcre \
+        pcre2 \
         libgd \
         geoip \
         libxslt \
