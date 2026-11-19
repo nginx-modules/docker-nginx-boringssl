@@ -159,8 +159,10 @@ RUN set -eux \
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
         -DCMAKE_C_FLAGS="${LTO_FLAGS} -Wno-error=array-bounds -Wno-error=stringop-overread" \
         -DCMAKE_CXX_FLAGS="${LTO_FLAGS} -Wno-error=array-bounds -Wno-error=stringop-overread" \
-        -DCMAKE_EXE_LINKER_FLAGS="-flto=auto -lstdc++ -lgcc_s" \
-    && make -C/usr/src/boringssl/build -j"$(getconf _NPROCESSORS_ONLN)" \
+        -DBUILD_TESTING=OFF \
+    && cmake --build /usr/src/boringssl/build \
+        --target ssl crypto \
+        --parallel "$(getconf _NPROCESSORS_ONLN)" \
     \
     # -- Create the .openssl layout that nginx's configure detector expects ----
     # nginx's SSL detection probes <--with-openssl>/.openssl/include/openssl/ssl.h
@@ -351,10 +353,20 @@ COPY nginx.vh.no-default.conf /etc/nginx/conf.d/default.conf
 RUN set -eux \
     # -- Grab envsubst, resolve runtime deps -----------------------------------
     && apk add --no-cache --virtual .gettext gettext \
+    && apk add --no-cache --virtual .nginx-rundeps-bootstrap \
+        libgcc \
+        libstdc++ \
+        pcre \
+        libgd \
+        geoip \
+        libxslt \
+        perl \
+        zlib \
     && mv /usr/bin/envsubst /tmp/ \
     && runDeps="$( \
         scanelf --needed --nobanner \
             /usr/sbin/nginx \
+            /usr/sbin/nginx-debug \
             /usr/lib/nginx/modules/*.so \
             /tmp/envsubst \
         | awk '{ gsub(/,/, "\nso:", $2); print "so:" $2 }' \
@@ -363,7 +375,7 @@ RUN set -eux \
         | sort -u \
     ) tzdata ca-certificates" \
     && apk add --no-cache --virtual .nginx-rundeps ${runDeps} \
-    && apk del .gettext \
+    && apk del .gettext .nginx-rundeps-bootstrap \
     && mv /tmp/envsubst /usr/local/bin/ \
     \
     # -- Forward logs to Docker log collector ----------------------------------
