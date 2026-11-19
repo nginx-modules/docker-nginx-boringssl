@@ -130,7 +130,7 @@ jobs:
           platforms: ${{ matrix.platforms }}
           # Push by digest only (no mutable tag from the build job). rewrite-timestamp clamps
           # file mtimes to SOURCE_DATE_EPOCH. The final image is a single layer (Dockerfile).
-          outputs: type=image,name=${{ env.GHCR_IMAGE }},push-by-digest=true,name-canonical=true,push=true,rewrite-timestamp=true
+          outputs: type=image,name=${{ env.GHCR_IMAGE }},push-by-digest=true,name-canonical=true,push=true,rewrite-timestamp=true,oci-mediatypes=true
           provenance: mode=max
           sbom: true
           build-args: |
@@ -301,13 +301,18 @@ jobs:
           [[ "${digest}" == "${reported}" ]] \
             || { echo "::error::index digest mismatch: computed ${digest}, buildx ${reported}"; exit 1; }
 
-          # 1. index-level annotations present and exact
-          jq -e --arg c "${BUILD_DATE}" --arg r "${VCS_REF}" '
-              .annotations["org.opencontainers.image.created"]  == $c and
+          # 1. OCI index and index-level annotations present and exact
+          nginx_version="$(sed -n 's/^ARG NGINX_VERSION=//p' "${RELEASE}/Dockerfile")"
+          [[ -n "${nginx_version}" ]] || { echo "::error::cannot read NGINX_VERSION from ${RELEASE}/Dockerfile"; exit 1; }
+          jq -e --arg c "${BUILD_DATE}" --arg r "${VCS_REF}" \
+            --arg d "NGINX ${nginx_version} built on Alpine with BoringSSL, Brotli, and QUIC support" '
+              .mediaType == "application/vnd.oci.image.index.v1+json" and
+              .annotations["org.opencontainers.image.description"] == $d and
+              .annotations["org.opencontainers.image.created"] == $c and
               .annotations["org.opencontainers.image.revision"] == $r and
               (.annotations["org.opencontainers.image.source"] | length > 0)
             ' <<< "${raw}" > /dev/null \
-            || { echo "::error::index annotations missing or wrong"; jq .annotations <<< "${raw}"; exit 1; }
+            || { echo "::error::OCI index media type or required annotations missing/wrong"; jq '{mediaType, annotations}' <<< "${raw}"; exit 1; }
 
           # 2. every platform that was built is present exactly once
           shopt -s nullglob
