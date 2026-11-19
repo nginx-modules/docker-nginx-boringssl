@@ -138,8 +138,8 @@ RUN set -eux \
         su-exec \
         tar \
         tzdata \
-        zlib \
-        zlib-dev
+        zlib-ng \
+        zlib-ng-dev
 
 # -----------------------------------------------------------------------------
 # boringssl-build: BoringSSL via CMake (slowest stage; independent of nginx version)
@@ -369,7 +369,7 @@ RUN set -eux \
         geoip \
         libxslt \
         perl \
-        zlib \
+        zlib-ng \
     && mv /usr/bin/envsubst /tmp/ \
     && runDeps="$( \
         scanelf --needed --nobanner \

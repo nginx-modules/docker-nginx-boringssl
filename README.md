@@ -39,10 +39,11 @@ This project is currently in an **experimental state** due to the continuously e
 ## Features
 
 - Based on **Alpine Linux**.
-- **PCRE** with JIT enabled.
+- **PCRE2** with JIT enabled.
 - **HTTP/2** (+NPN) support.
 - **Async I/O** using threads supported.
 - **Dynamic TLS record patch** for Cloudflare (enabled).
+* **zlib-ng** instead of **zlib**
 - **Gzip static `.gz` files** support enabled.
 - **Brotli static `.br` files** support enabled.
   - On-the-fly Brotli compression is **disabled** (unstable).
