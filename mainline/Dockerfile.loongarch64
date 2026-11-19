@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
 FROM --platform=linux/loong64 loongarch64/alpine:3.21
 
-ENV NGINX_VERSION=1.31.8
-ENV BORINGSSL_TAG=0.20261020.0
+ENV NGINX_VERSION=1.31.9
+ENV BORINGSSL_TAG=0.20261105.0
 
 ENV CONFIG="\
     --prefix=/etc/nginx \
