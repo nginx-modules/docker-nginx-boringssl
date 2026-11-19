@@ -15,8 +15,37 @@ env:
   GHCR_IMAGE: ghcr.io/${{ github.repository_owner }}/nginx-boringssl
   DHUB_IMAGE: docker.io/denji/nginx-boringssl
 
+# Release pipeline (strict order, each stage gates the next):
+#   build (per arch, GHCR only, digest recorded)
+#     -> merge: GHCR index + OCI annotations -> verify -> cosign sign -> cosign verify
+#       -> Docker Hub: copy by digest -> verify digest -> cosign sign -> cosign verify
+# Docker Hub is last on purpose: a Docker Hub outage / rate limit can never block or
+# undo the GHCR release. mainline and stable run as independent matrix legs.
+
+permissions: {}
+
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      build_date: ${{ steps.meta.outputs.build_date }}
+      vcs_ref: ${{ steps.meta.outputs.vcs_ref }}
+    steps:
+      # One timestamp / revision for the whole run, so image-config labels (Dockerfile)
+      # and index annotations (merge job) can never disagree.
+      - name: Compute build metadata
+        id: meta
+        env:
+          VCS_REF: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "vcs_ref=${VCS_REF}"                         >> "$GITHUB_OUTPUT"
+
   build:
+    needs: prepare
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -68,6 +97,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      # GHCR only: Docker Hub is published later from the verified GHCR digests.
       - name: Login to GHCR
         uses: docker/login-action@v4
         with:
@@ -75,34 +105,83 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Login to DockerHub
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Build and push ${{ matrix.tag }}
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.build_dir }}
           file: ${{ matrix.build_dir }}/${{ matrix.dockerfile }}
           platforms: ${{ matrix.platforms }}
           push: true
-          tags: |
-            ${{ env.GHCR_IMAGE }}:${{ matrix.tag }}
-            ${{ env.DHUB_IMAGE }}:${{ matrix.tag }}
+          tags: ${{ env.GHCR_IMAGE }}:${{ matrix.tag }}
+          build-args: |
+            BUILD_DATE=${{ needs.prepare.outputs.build_date }}
+            VCS_REF=${{ needs.prepare.outputs.vcs_ref }}
           #cache-from: type=registry,ref=${{ env.GHCR_IMAGE }}:cache-${{ matrix.tag }}
           #cache-to: type=registry,ref=${{ env.GHCR_IMAGE }}:cache-${{ matrix.tag }},mode=max
           cache-from: type=gha,scope=${{ matrix.tag }}
           cache-to: type=gha,mode=max,scope=${{ matrix.tag }}
 
+      # The merge job consumes immutable digests, not the mutable per-arch tags:
+      # a concurrent/later run can no longer swap an image between build and merge.
+      - name: Record digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          PLATFORM: ${{ matrix.platforms }}
+          TAG: ${{ matrix.tag }}
+        run: |
+          set -euo pipefail
+          [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] \
+            || { echo "::error::build produced no valid digest for ${TAG}: '${DIGEST}'"; exit 1; }
+          mkdir -p digests
+          printf '%s %s\n' "${PLATFORM}" "${DIGEST}" > "digests/${TAG}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.tag }}
+          path: digests/${{ matrix.tag }}
+          if-no-files-found: error
+          retention-days: 7
+
   merge:
+    name: merge ${{ matrix.release }}
+    # All architectures must have built: never publish a silently partial multi-arch index.
+    needs: [prepare, build]
     runs-on: ubuntu-latest
-    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        release: [ mainline, stable ]
     permissions:
       contents: read
       packages: write
+      id-token: write   # cosign keyless signing (Sigstore OIDC)
+    env:
+      RELEASE: ${{ matrix.release }}
+      BUILD_DATE: ${{ needs.prepare.outputs.build_date }}
+      VCS_REF: ${{ needs.prepare.outputs.vcs_ref }}
+      # Used only to decide whether the Docker Hub stage runs (forks have no secrets).
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      COSIGN_ISSUER: https://token.actions.githubusercontent.com
+      COSIGN_IDENTITY: https://github.com/${{ github.workflow_ref }}
     steps:
+      - name: Check Out Repo
+        uses: actions/checkout@v7
+
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digest-${{ matrix.release }}-*
+          path: digests
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
       - name: Login to GHCR
         uses: docker/login-action@v4
         with:
@@ -110,43 +189,184 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # ----------------------------------------------------------------------------
+      # Stage 1: GHCR — merge, annotate, verify, sign, verify signature
+      # ----------------------------------------------------------------------------
+      - name: Merge ${{ matrix.release }}-alpine manifest (GHCR)
+        run: |
+          set -euo pipefail
+
+          nginx_version="$(sed -n 's/^ENV NGINX_VERSION=//p' "${RELEASE}/Dockerfile")"
+          [[ -n "${nginx_version}" ]] || { echo "::error::cannot read NGINX_VERSION from ${RELEASE}/Dockerfile"; exit 1; }
+
+          shopt -s nullglob
+          files=(digests/"${RELEASE}"-*)
+          (( ${#files[@]} > 0 )) || { echo "::error::no digests found for ${RELEASE}"; exit 1; }
+
+          sources=()
+          for f in "${files[@]}"; do
+            read -r platform digest < "${f}"
+            [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::bad digest in ${f}: '${digest}'"; exit 1; }
+            sources+=("${GHCR_IMAGE}@${digest}")
+            echo "  ${platform}  ${digest}  (${f##*/})"
+          done
+
+          # Index-level annotations: image-config labels do NOT survive `imagetools create`,
+          # and GHCR / Docker Hub read these from the index. Keep in sync with Dockerfile LABELs.
+          repo="https://github.com/${GITHUB_REPOSITORY}"
+          annotations=(
+            --annotation "index:org.opencontainers.image.title=NGINX with BoringSSL"
+            --annotation "index:org.opencontainers.image.description=NGINX ${nginx_version} built on Alpine with BoringSSL, Brotli, and QUIC support"
+            --annotation "index:org.opencontainers.image.source=${repo}"
+            --annotation "index:org.opencontainers.image.url=${repo}"
+            --annotation "index:org.opencontainers.image.documentation=${repo}#readme"
+            --annotation "index:org.opencontainers.image.authors=Denis Denisov <denji0k@gmail.com>"
+            --annotation "index:org.opencontainers.image.version=${nginx_version}"
+            --annotation "index:org.opencontainers.image.created=${BUILD_DATE}"
+            --annotation "index:org.opencontainers.image.revision=${VCS_REF}"
+            --annotation "index:org.opencontainers.image.licenses=BSD-2-Clause"
+            --annotation "index:org.opencontainers.image.ref.name=${RELEASE}-alpine"
+          )
+
+          retry() { local n=0; until "$@"; do n=$((n+1)); (( n >= 3 )) && return 1; echo "retry ${n}/3: $*"; sleep $((n*10)); done; }
+
+          retry docker buildx imagetools create \
+            --tag "${GHCR_IMAGE}:${RELEASE}-alpine" \
+            "${annotations[@]}" \
+            "${sources[@]}"
+
+      - name: Verify merged index (GHCR)
+        id: verify
+        run: |
+          set -euo pipefail
+          ref="${GHCR_IMAGE}:${RELEASE}-alpine"
+
+          raw="$(docker buildx imagetools inspect --raw "${ref}")"
+          digest="sha256:$(printf '%s' "${raw}" | sha256sum | cut -d' ' -f1)"
+          # Cross-check our computed digest against what buildx reports.
+          reported="$(docker buildx imagetools inspect "${ref}" --format '{{.Manifest.Digest}}')"
+          [[ "${digest}" == "${reported}" ]] \
+            || { echo "::error::index digest mismatch: computed ${digest}, buildx ${reported}"; exit 1; }
+
+          # 1. index-level annotations present and exact
+          jq -e --arg c "${BUILD_DATE}" --arg r "${VCS_REF}" '
+              .annotations["org.opencontainers.image.created"]  == $c and
+              .annotations["org.opencontainers.image.revision"] == $r and
+              (.annotations["org.opencontainers.image.source"] | length > 0)
+            ' <<< "${raw}" > /dev/null \
+            || { echo "::error::index annotations missing or wrong"; jq .annotations <<< "${raw}"; exit 1; }
+
+          # 2. every platform that was built is present exactly once
+          shopt -s nullglob
+          files=(digests/"${RELEASE}"-*)
+          for f in "${files[@]}"; do
+            read -r platform _ < "${f}"
+            IFS=/ read -r os arch variant <<< "${platform}"
+            n="$(jq --arg os "${os}" --arg arch "${arch}" --arg v "${variant:-}" '
+                  [.manifests[]
+                   | select(.platform.os == $os and .platform.architecture == $arch
+                            and ($v == "" or .platform.variant == $v))] | length' <<< "${raw}")"
+            [[ "${n}" == "1" ]] || { echo "::error::platform ${platform}: expected 1 manifest in index, found ${n}"; jq -c '.manifests[].platform' <<< "${raw}"; exit 1; }
+          done
+
+          # 3. no foreign image platforms beyond what was built (attestations are os=unknown)
+          expected="${#files[@]}"
+          actual="$(jq '[.manifests[] | select(.platform.os != "unknown")] | length' <<< "${raw}")"
+          [[ "${actual}" == "${expected}" ]] \
+            || { echo "::error::index has ${actual} image manifests, expected ${expected}"; exit 1; }
+
+          # 4. image-config labels survived into every platform image (best-effort: needs
+          #    `.Image` to be exposed by this buildx version, otherwise only warn).
+          cfg="$(docker buildx imagetools inspect "${ref}" --format '{{json .Image}}' || true)"
+          if [[ -n "${cfg}" ]] && jq -e '[.. | objects | select(has("config"))] | length > 0' <<< "${cfg}" > /dev/null 2>&1; then
+            jq -e --arg c "${BUILD_DATE}" --arg r "${VCS_REF}" '
+                [.. | objects | select(has("config")) | .config.Labels // {}]
+                | all(.["org.opencontainers.image.created"] == $c and .["org.opencontainers.image.revision"] == $r)
+              ' <<< "${cfg}" > /dev/null \
+              || { echo "::error::image config labels created/revision missing or wrong"; jq -c '[.. | objects | select(has("config")) | .config.Labels]' <<< "${cfg}"; exit 1; }
+          else
+            echo "::warning::could not read image configs via imagetools; config-label check skipped"
+          fi
+
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "GHCR ${ref} -> ${digest}"
+
+      - name: Sign and verify signatures (GHCR)
+        env:
+          INDEX_DIGEST: ${{ steps.verify.outputs.digest }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          digests=("${INDEX_DIGEST}")
+          for f in digests/"${RELEASE}"-*; do read -r _ d < "${f}"; digests+=("${d}"); done
+
+          for d in "${digests[@]}"; do
+            ref="${GHCR_IMAGE}@${d}"        # sign by digest, never by tag
+            cosign sign --yes "${ref}"
+            cosign verify \
+              --certificate-identity "${COSIGN_IDENTITY}" \
+              --certificate-oidc-issuer "${COSIGN_ISSUER}" \
+              "${ref}" > /dev/null
+            echo "signed+verified ${ref}"
+          done
+
+          {
+            echo "### GHCR \`${RELEASE}-alpine\`"
+            echo "- index: \`${INDEX_DIGEST}\`"
+            for f in digests/"${RELEASE}"-*; do read -r p d < "${f}"; echo "- \`${p}\`: \`${d}\`"; done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ----------------------------------------------------------------------------
+      # Stage 2: Docker Hub — only after GHCR is merged, verified and signed.
+      # Failure here fails this leg (visible) but cannot affect anything on GHCR.
+      # ----------------------------------------------------------------------------
       - name: Login to DockerHub
+        if: env.DOCKERHUB_USERNAME != ''
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Merge and push mainline-alpine manifest
+      - name: Publish to Docker Hub (copy by digest, sign, verify)
+        if: env.DOCKERHUB_USERNAME != ''
+        env:
+          INDEX_DIGEST: ${{ steps.verify.outputs.digest }}
         run: |
-          docker buildx imagetools create -t ${{ env.GHCR_IMAGE }}:mainline-alpine \
-            ${{ env.GHCR_IMAGE }}:mainline-amd64-alpine \
-            ${{ env.GHCR_IMAGE }}:mainline-aarch64-alpine \
-            ${{ env.GHCR_IMAGE }}:mainline-armv7-alpine \
-            ${{ env.GHCR_IMAGE }}:mainline-armv6-alpine \
-            ${{ env.GHCR_IMAGE }}:mainline-riscv64-alpine \
-          #  ${{ env.GHCR_IMAGE }}:mainline-loong64-alpine
-          #  ${{ env.GHCR_IMAGE }}:mainline-ppc64le-alpine
-          #  ${{ env.GHCR_IMAGE }}:mainline-s390x-alpine
-          #  ${{ env.GHCR_IMAGE }}:mainline-mips64le-alpine
+          set -euo pipefail
+          retry() { local n=0; until "$@"; do n=$((n+1)); (( n >= 3 )) && return 1; echo "retry ${n}/3: $*" >&2; sleep $((n*10)); done; }
 
-          docker buildx imagetools create -t ${{ env.DHUB_IMAGE }}:mainline-alpine \
-            ${{ env.GHCR_IMAGE }}:mainline-alpine
+          # copy_tag <dest-tag> <source-digest>: re-tag the exact GHCR manifest on Docker Hub.
+          copy_tag() {
+            local tag="$1" src="$2" dst got
+            dst="${DHUB_IMAGE}:${tag}"
+            retry docker buildx imagetools create --tag "${dst}" "${GHCR_IMAGE}@${src}" >&2   # stdout is the return value
+            got="$(docker buildx imagetools inspect "${dst}" --format '{{.Manifest.Digest}}')"
+            if [[ "${got}" != "${src}" ]]; then
+              echo "::warning::${dst} digest ${got} differs from GHCR ${src}; signing the Docker Hub digest" >&2
+            fi
+            printf '%s\n' "${got}"
+          }
 
-      - name: Merge and push stable-alpine manifest
-        run: |
-          docker buildx imagetools create -t ${{ env.GHCR_IMAGE }}:stable-alpine \
-            ${{ env.GHCR_IMAGE }}:stable-amd64-alpine \
-            ${{ env.GHCR_IMAGE }}:stable-aarch64-alpine \
-            ${{ env.GHCR_IMAGE }}:stable-armv7-alpine \
-            ${{ env.GHCR_IMAGE }}:stable-armv6-alpine \
-            ${{ env.GHCR_IMAGE }}:stable-riscv64-alpine \
-          #  ${{ env.GHCR_IMAGE }}:stable-loong64-alpine
-          #  ${{ env.GHCR_IMAGE }}:stable-ppc64le-alpine
-          #  ${{ env.GHCR_IMAGE }}:stable-s390x-alpine
-          #  ${{ env.GHCR_IMAGE }}:stable-mips64le-alpine
+          signed=()
+          # per-arch tags first (kept for backward compatibility), index last
+          for f in digests/"${RELEASE}"-*; do
+            read -r _ d < "${f}"
+            signed+=("$(copy_tag "${f##*/}" "${d}")")
+          done
+          signed+=("$(copy_tag "${RELEASE}-alpine" "${INDEX_DIGEST}")")
 
-          docker buildx imagetools create -t ${{ env.DHUB_IMAGE }}:stable-alpine \
-            ${{ env.GHCR_IMAGE }}:stable-alpine
+          for d in "${signed[@]}"; do
+            ref="${DHUB_IMAGE}@${d}"
+            retry cosign sign --yes "${ref}"
+            cosign verify \
+              --certificate-identity "${COSIGN_IDENTITY}" \
+              --certificate-oidc-issuer "${COSIGN_ISSUER}" \
+              "${ref}" > /dev/null
+            echo "signed+verified ${ref}"
+          done
+
+          echo "- Docker Hub \`${RELEASE}-alpine\`: \`${signed[-1]}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Docker Hub skipped
+        if: env.DOCKERHUB_USERNAME == ''
+        run: echo "::notice::DOCKERHUB_USERNAME secret not available; Docker Hub stage skipped"

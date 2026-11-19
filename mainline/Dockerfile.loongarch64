@@ -265,12 +265,22 @@ COPY nginx.vh.no-default.conf /etc/nginx/conf.d/default.conf
 
 ARG TARGETARCH=unknown
 ARG TARGETOS=unknown
+# Injected by CI (RFC 3339 build timestamp / full commit SHA). Declared after the
+# RUN layer on purpose: a changing ARG value must not invalidate the build cache.
+# Empty for local builds without --build-arg.
+ARG BUILD_DATE=""
+ARG VCS_REF=""
 
 LABEL org.opencontainers.image.title="NGINX with BoringSSL" \
       org.opencontainers.image.description="NGINX ${NGINX_VERSION} built on Alpine with BoringSSL, Brotli, and QUIC support" \
       org.opencontainers.image.source="https://github.com/nginx-modules/docker-nginx-boringssl" \
+      org.opencontainers.image.url="https://github.com/nginx-modules/docker-nginx-boringssl" \
+      org.opencontainers.image.documentation="https://github.com/nginx-modules/docker-nginx-boringssl#readme" \
       org.opencontainers.image.authors="Denis Denisov <denji0k@gmail.com>" \
       org.opencontainers.image.version="${NGINX_VERSION}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.base.name="docker.io/loongarch64/alpine:3.21" \
       org.opencontainers.image.licenses="BSD-2-Clause" \
       org.opencontainers.image.architecture="${TARGETARCH}" \
       org.opencontainers.image.os="${TARGETOS}" \
