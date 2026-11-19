@@ -62,3 +62,25 @@ This project is currently in an **experimental state** due to the continuously e
   - This mechanism is particularly useful for ChaCha20, while AES remains faster on hardware with AES-NI support.
 
 ---
+
+---
+
+## Supply chain
+
+- **Signing**: every image digest (per-arch and the multi-arch index) is signed with cosign keyless (Sigstore, GitHub OIDC) on GHCR and Docker Hub. Verify:
+  ```sh
+  cosign verify ghcr.io/nginx-modules/nginx-boringssl:mainline-alpine \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    --certificate-identity-regexp '^https://github.com/nginx-modules/docker-nginx-boringssl/\.github/workflows/docker-image\.yml@'
+  ```
+- **Attestations**: buildkit provenance (`mode=max`) and an SBOM are attached to each per-arch image. The index additionally carries a signed GitHub build-provenance attestation:
+  ```sh
+  gh attestation verify oci://ghcr.io/nginx-modules/nginx-boringssl:mainline-alpine --repo nginx-modules/docker-nginx-boringssl
+  ```
+- **Metadata**: `org.opencontainers.image.created` is the commit time and `revision` the full commit SHA, both as image-config labels and as index annotations.
+
+## Reproducibility
+
+Build inputs are pinned: Alpine base digest, BoringSSL commit, ngx_brotli / headers-more / njs commits, and the dynamic-TLS patch (commit + sha256). File timestamps are clamped to the commit time (`SOURCE_DATE_EPOCH`, `rewrite-timestamp`).
+
+**Not guaranteed bit-for-bit reproducible**: `apk add` resolves current Alpine package versions at build time. The `Reproducibility check` workflow rebuilds each release twice and reports whether the digests match and, if not, which layers differ. Treat the image as *reproducible only while that check is green*.

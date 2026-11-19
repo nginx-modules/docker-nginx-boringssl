@@ -18,7 +18,11 @@ env:
 # Release pipeline (strict order, each stage gates the next):
 #   build (per arch, GHCR only, digest recorded)
 #     -> merge: GHCR index + OCI annotations -> verify -> cosign sign -> cosign verify
-#       -> Docker Hub: copy by digest -> verify digest -> cosign sign -> cosign verify
+#       -> signed SLSA provenance attestation (GitHub) -> gh attestation verify
+#       -> Docker Hub: copy by digest -> verify digest -> cosign sign -> cosign verify -> attest
+# Per-arch images carry buildkit provenance (mode=max) + SBOM attestations; timestamps are
+# derived from the commit (SOURCE_DATE_EPOCH) so identical inputs give comparable output.
+# See reproducibility.yml for the (separate, non-gating) rebuild-and-compare check.
 # Docker Hub is last on purpose: a Docker Hub outage / rate limit can never block or
 # undo the GHCR release. mainline and stable run as independent matrix legs.
 
@@ -32,17 +36,25 @@ jobs:
     outputs:
       build_date: ${{ steps.meta.outputs.build_date }}
       vcs_ref: ${{ steps.meta.outputs.vcs_ref }}
+      source_date_epoch: ${{ steps.meta.outputs.source_date_epoch }}
     steps:
+      - name: Check Out Repo
+        uses: actions/checkout@v7
+
       # One timestamp / revision for the whole run, so image-config labels (Dockerfile)
-      # and index annotations (merge job) can never disagree.
+      # and index annotations (merge job) can never disagree. The timestamp is the
+      # COMMIT time (not wall clock): re-running a commit yields the same value.
       - name: Compute build metadata
         id: meta
         env:
           VCS_REF: ${{ github.sha }}
         run: |
           set -euo pipefail
-          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-          echo "vcs_ref=${VCS_REF}"                         >> "$GITHUB_OUTPUT"
+          epoch="$(git show -s --format=%ct "${VCS_REF}")"
+          [[ "${epoch}" =~ ^[0-9]+$ ]] || { echo "::error::cannot read commit time of ${VCS_REF}"; exit 1; }
+          echo "source_date_epoch=${epoch}"                              >> "$GITHUB_OUTPUT"
+          echo "build_date=$(date -u -d "@${epoch}" +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "vcs_ref=${VCS_REF}"                                      >> "$GITHUB_OUTPUT"
 
   build:
     needs: prepare
@@ -112,11 +124,15 @@ jobs:
           context: ${{ matrix.build_dir }}
           file: ${{ matrix.build_dir }}/${{ matrix.dockerfile }}
           platforms: ${{ matrix.platforms }}
-          push: true
+          # type=registry == push; rewrite-timestamp clamps file mtimes to SOURCE_DATE_EPOCH
+          outputs: type=registry,rewrite-timestamp=true
           tags: ${{ env.GHCR_IMAGE }}:${{ matrix.tag }}
+          provenance: mode=max
+          sbom: true
           build-args: |
             BUILD_DATE=${{ needs.prepare.outputs.build_date }}
             VCS_REF=${{ needs.prepare.outputs.vcs_ref }}
+            SOURCE_DATE_EPOCH=${{ needs.prepare.outputs.source_date_epoch }}
           #cache-from: type=registry,ref=${{ env.GHCR_IMAGE }}:cache-${{ matrix.tag }}
           #cache-to: type=registry,ref=${{ env.GHCR_IMAGE }}:cache-${{ matrix.tag }},mode=max
           cache-from: type=gha,scope=${{ matrix.tag }}
@@ -156,7 +172,8 @@ jobs:
     permissions:
       contents: read
       packages: write
-      id-token: write   # cosign keyless signing (Sigstore OIDC)
+      id-token: write      # cosign keyless signing + GitHub attestations (Sigstore OIDC)
+      attestations: write  # actions/attest-build-provenance
     env:
       RELEASE: ${{ matrix.release }}
       BUILD_DATE: ${{ needs.prepare.outputs.build_date }}
@@ -316,6 +333,22 @@ jobs:
             for f in digests/"${RELEASE}"-*; do read -r p d < "${f}"; echo "- \`${p}\`: \`${d}\`"; done
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Signed SLSA provenance for the final index, stored next to the image in GHCR.
+      - name: Attest build provenance (GHCR)
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-name: ${{ env.GHCR_IMAGE }}
+          subject-digest: ${{ steps.verify.outputs.digest }}
+          push-to-registry: true
+
+      - name: Verify attestation (GHCR)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INDEX_DIGEST: ${{ steps.verify.outputs.digest }}
+        run: |
+          set -euo pipefail
+          gh attestation verify "oci://${GHCR_IMAGE}@${INDEX_DIGEST}" --repo "${GITHUB_REPOSITORY}"
+
       # ----------------------------------------------------------------------------
       # Stage 2: Docker Hub — only after GHCR is merged, verified and signed.
       # Failure here fails this leg (visible) but cannot affect anything on GHCR.
@@ -328,6 +361,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Publish to Docker Hub (copy by digest, sign, verify)
+        id: dhub
         if: env.DOCKERHUB_USERNAME != ''
         env:
           INDEX_DIGEST: ${{ steps.verify.outputs.digest }}
@@ -366,6 +400,15 @@ jobs:
           done
 
           echo "- Docker Hub \`${RELEASE}-alpine\`: \`${signed[-1]}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "digest=${signed[-1]}" >> "$GITHUB_OUTPUT"
+
+      - name: Attest build provenance (Docker Hub)
+        if: env.DOCKERHUB_USERNAME != ''
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-name: index.${{ env.DHUB_IMAGE }}
+          subject-digest: ${{ steps.dhub.outputs.digest }}
+          push-to-registry: true
 
       - name: Docker Hub skipped
         if: env.DOCKERHUB_USERNAME == ''

@@ -7,7 +7,8 @@
 # FROM alpine:edge    # Bleeding edge; frequent breaking changes in musl/GCC
 
 # (3.23) Fails: musl 1.2.5+ removed LFS64 (fopen64/fseeko64)
-FROM alpine:latest
+# Pinned by digest (multi-arch index). Refresh: docker buildx imagetools inspect alpine:latest
+FROM alpine:latest@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 
 # FROM alpine:3.22    # Fails: GCC 14/15 strictness on BoringSSL PKI modules
 # FROM alpine:3.21    # Fails: Missing legacy symbols required for BoringSSL link
@@ -72,6 +73,17 @@ ENV CONFIG="\
     --add-dynamic-module=/usr/src/njs/nginx \
     --with-openssl=/usr/src/boringssl \
 "
+
+# -----------------------------------------------------------------------------
+# PINNED BUILD INPUTS (reproducibility). Bump deliberately, together with
+# NGINX_VERSION / BORINGSSL_TAG; every pin is verified inside the RUN below.
+# -----------------------------------------------------------------------------
+ARG BORINGSSL_COMMIT=3dc4b63808921e914a3fb1fa61869abc3938781b
+ARG NGX_BROTLI_COMMIT=53e0fb55f250f48fe80c0ddbf6c0f7103cdbaae1
+ARG NGX_HEADERS_MORE_COMMIT=e30b10e0bb1cfb042d76ba3a865410ff95d65660
+ARG NJS_COMMIT=b67014d7c41bbf1fb06007122d4061c3bddd97d3
+ARG DYN_TLS_COMMIT=afb50796c16a2a8cdebfdd86ebb8806b05db3a35
+ARG DYN_TLS_SHA256=0aa9c73e7515dbbd48ecc798f7894412c1a50e96e98aee25847e823059faf821
 
 RUN set -eux \
     \
@@ -153,17 +165,27 @@ RUN set -eux \
     && tar -zxC /usr/src -f nginx.tar.gz && rm nginx.tar.gz \
     \
     # -- Clone dynamic modules -------------------------------------------------
-    && git clone --depth=1 --recurse-submodules \
-           https://github.com/google/ngx_brotli /usr/src/ngx_brotli \
-    && git clone --depth=1 \
-           https://github.com/openresty/headers-more-nginx-module /usr/src/ngx_headers_more \
-    && git clone --depth=1 \
-           https://github.com/nginx/njs /usr/src/njs \
+    # Pinned to exact commits; fetch-by-SHA keeps the clone shallow.
+    && for spec in \
+           "https://github.com/google/ngx_brotli ${NGX_BROTLI_COMMIT} /usr/src/ngx_brotli" \
+           "https://github.com/openresty/headers-more-nginx-module ${NGX_HEADERS_MORE_COMMIT} /usr/src/ngx_headers_more" \
+           "https://github.com/nginx/njs ${NJS_COMMIT} /usr/src/njs" \
+       ; do \
+           set -- ${spec}; \
+           git init -q "$3" \
+           && git -C "$3" fetch -q --depth=1 "$1" "$2" \
+           && git -C "$3" checkout -q --detach FETCH_HEAD \
+           && [ "$(git -C "$3" rev-parse HEAD)" = "$2" ] \
+           || { echo >&2 "ERROR: failed to fetch $1 @ $2"; exit 1; }; \
+       done \
+    && git -C /usr/src/ngx_brotli submodule update --init --recursive --depth=1 \
     \
     # -- Build BoringSSL via CMake ---------------------------------------------
     && git clone https://boringssl.googlesource.com/boringssl /usr/src/boringssl \
     && cd /usr/src/boringssl \
     && git checkout --force --quiet "${BORINGSSL_TAG}" \
+    && { [ "$(git rev-parse HEAD)" = "${BORINGSSL_COMMIT}" ] \
+         || { echo >&2 "ERROR: BoringSSL ${BORINGSSL_TAG} is not ${BORINGSSL_COMMIT}"; exit 1; }; } \
     && cmake -B/usr/src/boringssl/build -S/usr/src/boringssl \
         -DCMAKE_BUILD_TYPE=RelWithDebInfo \
         -DCMAKE_CXX_STANDARD=17 \
@@ -191,8 +213,9 @@ RUN set -eux \
     # -- Patch -----------------------------------------------------------------
     && cd /usr/src/nginx-${NGINX_VERSION} \
     && curl -fsSL \
-           "https://raw.githubusercontent.com/nginx-modules/ngx_http_tls_dyn_size/refs/heads/master/nginx__dynamic_tls_records_1.29.2%2B.patch" \
+           "https://raw.githubusercontent.com/nginx-modules/ngx_http_tls_dyn_size/${DYN_TLS_COMMIT}/nginx__dynamic_tls_records_1.29.2%2B.patch" \
            -o dynamic_tls_records.patch \
+    && echo "${DYN_TLS_SHA256}  dynamic_tls_records.patch" | sha256sum -c - \
     && patch -p1 < dynamic_tls_records.patch \
     && rm dynamic_tls_records.patch \
     \

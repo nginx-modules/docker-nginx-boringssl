@@ -1,0 +1,117 @@
+name: Reproducibility check
+
+# Rebuilds the same commit twice from scratch (no cache) on the same runner type and
+# compares the resulting image manifest digests. NOT part of the release path: it never
+# blocks or publishes anything, it only reports whether the build is bit-for-bit
+# reproducible, and where it is not, which layers / files differ.
+#
+# Known remaining sources of non-determinism (see README "Reproducibility"):
+#   - `apk add` pulls whatever Alpine currently ships for the pinned base release
+#   - BoringSSL/nginx are built with LTO; toolchain output is deterministic only if
+#     the same gcc/binutils versions are used on both runs (true within one run)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * 1'   # weekly, Monday 03:17 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  rebuild-compare:
+    name: ${{ matrix.release }} (linux/amd64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        release: [ mainline, stable ]
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Compute build metadata (commit time, same as release workflow)
+        id: meta
+        run: |
+          set -euo pipefail
+          epoch="$(git show -s --format=%ct HEAD)"
+          echo "epoch=${epoch}" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u -d "@${epoch}" +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Build #1
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.release }}
+          file: ${{ matrix.release }}/Dockerfile
+          platforms: linux/amd64
+          no-cache: true
+          provenance: false
+          sbom: false
+          outputs: type=oci,dest=${{ runner.temp }}/a.tar,rewrite-timestamp=true
+          build-args: |
+            BUILD_DATE=${{ steps.meta.outputs.date }}
+            VCS_REF=${{ github.sha }}
+            SOURCE_DATE_EPOCH=${{ steps.meta.outputs.epoch }}
+
+      - name: Build #2
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.release }}
+          file: ${{ matrix.release }}/Dockerfile
+          platforms: linux/amd64
+          no-cache: true
+          provenance: false
+          sbom: false
+          outputs: type=oci,dest=${{ runner.temp }}/b.tar,rewrite-timestamp=true
+          build-args: |
+            BUILD_DATE=${{ steps.meta.outputs.date }}
+            VCS_REF=${{ github.sha }}
+            SOURCE_DATE_EPOCH=${{ steps.meta.outputs.epoch }}
+
+      - name: Compare
+        working-directory: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          for x in a b; do mkdir -p "${x}" && tar -xf "${x}.tar" -C "${x}"; done
+
+          manifest() { jq -r '.manifests[0].digest' "$1/index.json"; }
+          blob()     { echo "$1/blobs/sha256/${2#sha256:}"; }
+
+          ma="$(manifest a)"; mb="$(manifest b)"
+          echo "build #1 manifest: ${ma}"
+          echo "build #2 manifest: ${mb}"
+
+          if [[ "${ma}" == "${mb}" ]]; then
+            echo "### ${{ matrix.release }}: REPRODUCIBLE (${ma})" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          {
+            echo "### ${{ matrix.release }}: NOT reproducible"
+            echo "- #1 \`${ma}\`"
+            echo "- #2 \`${mb}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          ca="$(jq -r '.config.digest' "$(blob a "${ma}")")"
+          cb="$(jq -r '.config.digest' "$(blob b "${mb}")")"
+          [[ "${ca}" == "${cb}" ]] || { echo "config differs:"; diff <(jq -S . "$(blob a "${ca}")") <(jq -S . "$(blob b "${cb}")") || true; }
+
+          mapfile -t la < <(jq -r '.layers[].digest' "$(blob a "${ma}")")
+          mapfile -t lb < <(jq -r '.layers[].digest' "$(blob b "${mb}")")
+          for i in "${!la[@]}"; do
+            [[ "${la[$i]}" == "${lb[$i]:-}" ]] && continue
+            echo "::group::layer ${i} differs (${la[$i]} vs ${lb[$i]:-<missing>})"
+            # metadata (mtime/owner/mode) differences, then content differences
+            diff <(tar -tvf "$(blob a "${la[$i]}")" | sort -k6) \
+                 <(tar -tvf "$(blob b "${lb[$i]}")" | sort -k6) | head -n 80 || true
+            mkdir -p "la${i}" "lb${i}"
+            tar -xf "$(blob a "${la[$i]}")" -C "la${i}" 2>/dev/null || true
+            tar -xf "$(blob b "${lb[$i]}")" -C "lb${i}" 2>/dev/null || true
+            diff -rq "la${i}" "lb${i}" | head -n 80 || true
+            echo "::endgroup::"
+          done
+          exit 1

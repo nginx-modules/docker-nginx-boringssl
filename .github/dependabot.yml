@@ -1,0 +1,17 @@
+version: 2
+updates:
+  # Keeps `FROM alpine:latest@sha256:...` pinned digests fresh (PRs, never silent).
+  # NOTE: the module commit pins (ARG *_COMMIT) and BORINGSSL_TAG are not tracked by
+  # Dependabot; bump them by hand together with NGINX_VERSION.
+  - package-ecosystem: docker
+    directory: /mainline
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /stable
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
